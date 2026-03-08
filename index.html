@@ -629,9 +629,9 @@ const SIZES = [
 ];
 
 const LENGTHS = [
-  { id: 'sill', name: 'Sill Length', desc: 'Ends right at the window sill', finLen: w => w, extra: 0 },
-  { id: 'floor', name: 'Floor Length', desc: 'Hangs down to the floor — the most popular choice', badge: 'Popular', finLen: w => 84, extra: 0 },
-  { id: 'puddle', name: 'Puddle', desc: 'Pools on the floor for a luxurious, romantic look', finLen: w => 90, extra: 6 },
+  { id: 'sill', name: 'Sill Length', desc: 'Ends right at the window sill — about 45″', finLen: () => 45, extra: 0 },
+  { id: 'floor', name: 'Floor Length', desc: 'Hangs down to the floor — the most popular choice', badge: 'Popular', finLen: () => 84, extra: 0 },
+  { id: 'puddle', name: 'Puddle', desc: 'Pools on the floor for a luxurious, romantic look', finLen: () => 90, extra: 6 },
 ];
 
 const STYLES = [
@@ -883,7 +883,7 @@ function drawLengthIcon(id) {
   const dpr = devicePixelRatio || 1;
   const w = 96, h = 128;
   c.width = w * dpr; c.height = h * dpr;
-  c.style.width = w + 'px'; c.style.height = h + 'px';
+  // Let CSS width:100%;height:100% size the canvas within its 48x64 container
   const ctx = c.getContext('2d');
   ctx.scale(dpr, dpr);
 
@@ -1192,10 +1192,8 @@ function calcDims() {
   const styleObj = STYLES.find(s => s.id === S.style);
   const hdr = styleObj.hdr;
 
-  let finLen;
-  if (S.length === 'sill') finLen = S.width; // sill = window height (approximate as width for simplicity)
-  else if (S.length === 'floor') finLen = 84;
-  else finLen = 90; // puddle
+  const lenObj = LENGTHS.find(l => l.id === S.length) || LENGTHS[1];
+  const finLen = lenObj.finLen();
 
   const cutLen = finLen + hdr + ALLOW.bottomHem;
   const coverW = S.width + (ALLOW.overlap * 2);
@@ -1238,8 +1236,8 @@ function drawPreview() {
     for (let i = 0; i < 60; i++) {
       ctx.fillRect(Math.random() * cw, Math.random() * ch, 1, 1);
     }
-    // Window
-    const wx = cw * 0.2, wy = ch * 0.08, ww = cw * 0.6, wh = ch * 0.6;
+    // Window — positioned lower so rod and curtains look realistic
+    const wx = cw * 0.2, wy = ch * 0.18, ww = cw * 0.6, wh = ch * 0.45;
     ctx.fillStyle = '#B8D4E3'; ctx.fillRect(wx, wy, ww, wh);
     // Panes
     ctx.strokeStyle = '#D4C9B8'; ctx.lineWidth = 3;
@@ -1249,10 +1247,10 @@ function drawPreview() {
     // Sill
     ctx.fillStyle = '#D4C9B8'; ctx.fillRect(wx - 8, wy + wh, ww + 16, 6);
     // Floor
-    ctx.fillStyle = '#D4C0A8'; ctx.fillRect(0, ch * 0.85, cw, ch * 0.15);
+    ctx.fillStyle = '#D4C0A8'; ctx.fillRect(0, ch * 0.88, cw, ch * 0.12);
     ctx.strokeStyle = 'rgba(180,160,140,0.3)'; ctx.lineWidth = 0.5;
     for (let x = 0; x < cw; x += 40) {
-      ctx.beginPath(); ctx.moveTo(x, ch * 0.85); ctx.lineTo(x, ch); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, ch * 0.88); ctx.lineTo(x, ch); ctx.stroke();
     }
 
     drawCurtainOverlay(ctx, cw, ch);
@@ -1261,20 +1259,20 @@ function drawPreview() {
 
 function drawCurtainOverlay(ctx, cw, ch) {
   const color = S.color;
-  const wx = cw * 0.2, wy = ch * 0.08, ww = cw * 0.6;
-  const rodY = wy - 10;
+  const wx = cw * 0.2, wy = ch * 0.18, ww = cw * 0.6;
+  const rodY = wy - 12;
 
-  // Rod
+  // Rod — positioned just above the window
   ctx.fillStyle = '#B08D57';
   ctx.fillRect(wx - 20, rodY, ww + 40, 4);
   ctx.beginPath(); ctx.arc(wx - 20, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc(wx + ww + 20, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
 
-  // Curtain bottom
+  // Curtain bottom — aligned to window/floor proportions
   let curtainBottom;
-  if (S.length === 'sill') curtainBottom = wy + ch * 0.6 + 6;
-  else if (S.length === 'floor') curtainBottom = ch * 0.85;
-  else curtainBottom = ch * 0.9;
+  if (S.length === 'sill') curtainBottom = wy + ch * 0.45 + 6;
+  else if (S.length === 'floor') curtainBottom = ch * 0.88;
+  else curtainBottom = ch * 0.94;
 
   // Panels with folds
   ctx.fillStyle = color;
