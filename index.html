@@ -416,6 +416,32 @@ body {
 .tip-icon { flex-shrink: 0; font-size: 1rem; }
 .tip-text { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.55; }
 
+/* === WINDOW ADJUST === */
+.result-preview { position: relative; }
+.adjust-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 10; cursor: crosshair; touch-action: none;
+}
+.adjust-link {
+  display: block; text-align: center; margin-top: 8px;
+  font-size: 0.78rem; color: var(--text-muted); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.adjust-link:active { color: var(--terracotta); }
+.adjust-done-btn {
+  display: block; margin: 8px auto 0; padding: 8px 24px;
+  background: var(--terracotta); color: #fff; border: none; border-radius: var(--radius);
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
+}
+.detection-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 20px; font-size: 0.65rem;
+  font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  margin-top: 6px;
+}
+.detection-badge.detected { background: rgba(94,133,114,0.12); color: var(--sage); }
+.detection-badge.default { background: rgba(154,149,140,0.12); color: var(--text-muted); }
+
 .hidden { display: none !important; }
 </style>
 </head>
@@ -574,7 +600,12 @@ body {
     <p class="step-desc">Here's everything you need for your new curtains.</p>
 
     <div class="result-hero">
-      <div class="result-preview"><canvas id="previewCanvas"></canvas></div>
+      <div class="result-preview">
+        <canvas id="previewCanvas"></canvas>
+        <canvas id="adjustOverlay" class="adjust-overlay hidden"></canvas>
+      </div>
+      <div id="detectionBadge"></div>
+      <div id="adjustLink"></div>
       <div class="result-yardage">
         <div class="yardage-label">Total Fabric Needed</div>
         <div class="yardage-amount" id="yardageAmount">--</div>
@@ -617,6 +648,8 @@ const S = {
   color: '#C2705A',
   cameraFacing: 'environment', stream: null,
   shopify: null,
+  windowBounds: null,          // { x, y, w, h } normalized 0-1 from detection
+  windowDetectionConfidence: 0,
 };
 
 const SIZES = [
@@ -777,6 +810,8 @@ function capturePhoto() {
   c.getContext('2d').drawImage(v, 0, 0);
   const url = c.toDataURL('image/jpeg', 0.85);
   S.photo = url;
+  // Run window detection in background — results ready by Step 4
+  runWindowDetection(url);
   const img = document.getElementById('capturedPhoto');
   img.src = url; img.style.display = 'block';
   document.getElementById('cameraFeed').style.display = 'none';
@@ -788,7 +823,7 @@ function capturePhoto() {
 }
 
 function retakePhoto() {
-  S.photo = null;
+  S.photo = null; S.windowBounds = null; S.windowDetectionConfidence = 0;
   document.getElementById('capturedPhoto').style.display = 'none';
   document.getElementById('cameraFeed').style.display = 'block';
   document.getElementById('cameraGuideOverlay').style.display = 'flex';
@@ -804,6 +839,8 @@ function handleFileSelect(e) {
   const r = new FileReader();
   r.onload = ev => {
     S.photo = ev.target.result;
+    // Run window detection in background
+    runWindowDetection(ev.target.result);
     document.getElementById('noCamera').innerHTML = `
       <div style="position:relative; width:100%; aspect-ratio:3/4; border-radius:var(--radius-lg); overflow:hidden; margin-bottom:16px;">
         <img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;" alt="Your window">
@@ -816,7 +853,7 @@ function handleFileSelect(e) {
 }
 
 function retakeFile() {
-  S.photo = null;
+  S.photo = null; S.windowBounds = null; S.windowDetectionConfidence = 0;
   document.getElementById('noCamera').innerHTML = `
     <div class="photo-placeholder" onclick="triggerFileUpload()">
       <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="8" width="40" height="32" rx="4"/><circle cx="24" cy="24" r="8"/><circle cx="36" cy="14" r="2" fill="currentColor"/></svg>
@@ -1125,8 +1162,9 @@ function renderResults() {
   // Yardage
   document.getElementById('yardageAmount').textContent = dims.yards.toFixed(1);
 
-  // Preview
+  // Preview + detection UI
   drawPreview();
+  renderDetectionUI();
 
   // Details
   const styleObj = STYLES.find(s => s.id === S.style);
@@ -1259,18 +1297,32 @@ function drawPreview() {
 
 function drawCurtainOverlay(ctx, cw, ch) {
   const color = S.color;
-  const wx = cw * 0.2, wy = ch * 0.18, ww = cw * 0.6;
+
+  // Use detected window bounds if available, else hardcoded defaults
+  let wx, wy, ww, wh;
+  if (S.windowBounds && S.photo) {
+    wx = S.windowBounds.x * cw;
+    wy = S.windowBounds.y * ch;
+    ww = S.windowBounds.w * cw;
+    wh = S.windowBounds.h * ch;
+  } else {
+    wx = cw * 0.2;
+    wy = ch * 0.18;
+    ww = cw * 0.6;
+    wh = ch * 0.45;
+  }
   const rodY = wy - 12;
 
-  // Rod — positioned just above the window
+  // Rod — positioned just above the detected/default window
   ctx.fillStyle = '#B08D57';
-  ctx.fillRect(wx - 20, rodY, ww + 40, 4);
-  ctx.beginPath(); ctx.arc(wx - 20, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(wx + ww + 20, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
+  const rodExtend = Math.min(20, ww * 0.12);
+  ctx.fillRect(wx - rodExtend, rodY, ww + rodExtend * 2, 4);
+  ctx.beginPath(); ctx.arc(wx - rodExtend, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(wx + ww + rodExtend, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
 
-  // Curtain bottom — aligned to window/floor proportions
+  // Curtain bottom — sill is relative to detected window, floor/puddle are absolute
   let curtainBottom;
-  if (S.length === 'sill') curtainBottom = wy + ch * 0.45 + 6;
+  if (S.length === 'sill') curtainBottom = wy + wh + 6;
   else if (S.length === 'floor') curtainBottom = ch * 0.88;
   else curtainBottom = ch * 0.94;
 
@@ -1278,12 +1330,13 @@ function drawCurtainOverlay(ctx, cw, ch) {
   ctx.fillStyle = color;
   ctx.globalAlpha = 0.7;
 
-  // Left panel
-  const leftStart = wx - 16, leftEnd = wx + ww * 0.3;
+  // Left panel — sized relative to window width
+  const panelOverlap = Math.min(16, ww * 0.08);
+  const leftStart = wx - panelOverlap, leftEnd = wx + ww * 0.3;
   drawPanel(ctx, leftStart, rodY + 4, leftEnd, curtainBottom);
 
   // Right panel
-  const rightStart = wx + ww * 0.7, rightEnd = wx + ww + 16;
+  const rightStart = wx + ww * 0.7, rightEnd = wx + ww + panelOverlap;
   drawPanel(ctx, rightStart, rodY + 4, rightEnd, curtainBottom);
 
   ctx.globalAlpha = 1;
@@ -1316,6 +1369,380 @@ function drawPanel(ctx, x1, y1, x2, y2) {
   }
   ctx.globalAlpha = 0.7;
 }
+
+// ===== WINDOW DETECTION (CV Pipeline) =====
+
+function detectWindowBounds(photoDataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      // 1. Downscale to ~200px wide for speed
+      const maxDim = 200;
+      const scale = maxDim / Math.max(img.width, img.height);
+      const sw = Math.round(img.width * scale);
+      const sh = Math.round(img.height * scale);
+      const off = document.createElement('canvas');
+      off.width = sw; off.height = sh;
+      const octx = off.getContext('2d');
+      octx.drawImage(img, 0, 0, sw, sh);
+      const pixels = octx.getImageData(0, 0, sw, sh).data;
+
+      // 2. Grayscale luminance
+      const lum = new Float32Array(sw * sh);
+      for (let i = 0; i < sw * sh; i++) {
+        const r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2];
+        lum[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      }
+
+      // 3. Build integral images for brightness and edges
+      const intImg = buildIntegralImage(lum, sw, sh);
+      const edges = computeSobelEdges(lum, sw, sh);
+      const intEdge = buildIntegralImage(edges, sw, sh);
+
+      // 4. Total image brightness for contrast scoring
+      const totalPixels = sw * sh;
+      const totalBrightness = queryRect(intImg, 0, 0, sw - 1, sh - 1, sw);
+
+      // 5. Scan candidate rectangles
+      const stepX = Math.max(2, Math.round(sw * 0.05));
+      const stepY = Math.max(2, Math.round(sh * 0.05));
+      let best = null;
+      let bestScore = -1;
+
+      for (let y = 0; y < sh * 0.65; y += stepY) {
+        for (let x = 0; x < sw * 0.75; x += stepX) {
+          for (let rw = Math.round(sw * 0.15); rw <= Math.min(sw * 0.85, sw - x); rw += stepX) {
+            for (let rh = Math.round(sh * 0.15); rh <= Math.min(sh * 0.7, sh - y); rh += stepY) {
+              const x2 = x + rw - 1, y2 = y + rh - 1;
+              if (x2 >= sw || y2 >= sh) continue;
+
+              // Brightness contrast: inside vs outside
+              const area = rw * rh;
+              const insideBright = queryRect(intImg, x, y, x2, y2, sw);
+              const outsideBright = totalBrightness - insideBright;
+              const outsideArea = totalPixels - area;
+              const avgIn = insideBright / area;
+              const avgOut = outsideArea > 0 ? outsideBright / outsideArea : 128;
+              const contrast = avgOut > 0 ? avgIn / avgOut : 0;
+              const brightnessScore = Math.min(contrast / 2.0, 1.0);
+
+              // Edge strength at boundaries (strong edges = window frame)
+              const edgeBand = Math.max(2, Math.round(Math.min(rw, rh) * 0.08));
+              let edgeSum = 0, edgeCount = 0;
+              // Top edge
+              if (y > 0 && y + edgeBand - 1 < sh) {
+                edgeSum += queryRect(intEdge, x, y, x2, Math.min(y + edgeBand - 1, y2), sw);
+                edgeCount += rw * edgeBand;
+              }
+              // Bottom edge
+              if (y2 - edgeBand + 1 >= y) {
+                edgeSum += queryRect(intEdge, x, Math.max(y2 - edgeBand + 1, y), x2, y2, sw);
+                edgeCount += rw * edgeBand;
+              }
+              // Left edge
+              if (x + edgeBand - 1 <= x2) {
+                edgeSum += queryRect(intEdge, x, y, Math.min(x + edgeBand - 1, x2), y2, sw);
+                edgeCount += edgeBand * rh;
+              }
+              // Right edge
+              if (x2 - edgeBand + 1 >= x) {
+                edgeSum += queryRect(intEdge, Math.max(x2 - edgeBand + 1, x), y, x2, y2, sw);
+                edgeCount += edgeBand * rh;
+              }
+              const avgEdge = edgeCount > 0 ? edgeSum / edgeCount : 0;
+              const edgeScore = Math.min(avgEdge / 80, 1.0);
+
+              // Aspect ratio plausibility (windows are 0.5–3.0)
+              const ar = rw / rh;
+              let aspectScore;
+              if (ar >= 0.6 && ar <= 2.5) aspectScore = 1.0;
+              else if (ar >= 0.4 && ar <= 3.5) aspectScore = 0.5;
+              else aspectScore = 0.1;
+
+              // Position: prefer centered, upper-middle of image
+              const cx = (x + rw / 2) / sw;
+              const cy = (y + rh / 2) / sh;
+              const posScore = Math.exp(-2 * ((cx - 0.5) ** 2 + (cy - 0.38) ** 2));
+
+              // Size score: prefer moderately sized (not tiny, not huge)
+              const areaFrac = area / totalPixels;
+              const sizeScore = areaFrac >= 0.05 && areaFrac <= 0.6 ? 1.0 :
+                                areaFrac >= 0.02 ? 0.5 : 0.2;
+
+              // Weighted total
+              const score = brightnessScore * 0.45
+                          + edgeScore * 0.2
+                          + aspectScore * 0.12
+                          + posScore * 0.13
+                          + sizeScore * 0.1;
+
+              if (score > bestScore) {
+                bestScore = score;
+                best = { x: x / sw, y: y / sh, w: rw / sw, h: rh / sh, confidence: score };
+              }
+            }
+          }
+        }
+      }
+      resolve(best);
+    };
+    img.onerror = () => resolve(null);
+    img.src = photoDataUrl;
+  });
+}
+
+function buildIntegralImage(data, w, h) {
+  const int = new Float64Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < w; x++) {
+      rowSum += data[y * w + x];
+      int[y * w + x] = rowSum + (y > 0 ? int[(y - 1) * w + x] : 0);
+    }
+  }
+  return int;
+}
+
+function queryRect(int, x1, y1, x2, y2, w) {
+  const d = int[y2 * w + x2];
+  const a = (x1 > 0 && y1 > 0) ? int[(y1 - 1) * w + (x1 - 1)] : 0;
+  const b = (y1 > 0) ? int[(y1 - 1) * w + x2] : 0;
+  const c = (x1 > 0) ? int[y2 * w + (x1 - 1)] : 0;
+  return d - b - c + a;
+}
+
+function computeSobelEdges(lum, w, h) {
+  const edges = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx = -lum[(y - 1) * w + (x - 1)] + lum[(y - 1) * w + (x + 1)]
+               - 2 * lum[y * w + (x - 1)] + 2 * lum[y * w + (x + 1)]
+               - lum[(y + 1) * w + (x - 1)] + lum[(y + 1) * w + (x + 1)];
+      const gy = -lum[(y - 1) * w + (x - 1)] - 2 * lum[(y - 1) * w + x] - lum[(y - 1) * w + (x + 1)]
+               + lum[(y + 1) * w + (x - 1)] + 2 * lum[(y + 1) * w + x] + lum[(y + 1) * w + (x + 1)];
+      edges[y * w + x] = Math.sqrt(gx * gx + gy * gy);
+    }
+  }
+  return edges;
+}
+
+function runWindowDetection(photoUrl) {
+  S.windowBounds = null;
+  S.windowDetectionConfidence = 0;
+  detectWindowBounds(photoUrl).then(bounds => {
+    if (bounds && bounds.confidence >= 0.3) {
+      S.windowBounds = { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h };
+      S.windowDetectionConfidence = bounds.confidence;
+      console.log(`[WindowDetect] Found window at (${(bounds.x * 100).toFixed(0)}%, ${(bounds.y * 100).toFixed(0)}%) ` +
+        `size ${(bounds.w * 100).toFixed(0)}%×${(bounds.h * 100).toFixed(0)}% confidence=${bounds.confidence.toFixed(2)}`);
+    } else {
+      console.log('[WindowDetect] No window detected — using default placement');
+    }
+  });
+}
+
+// ===== MANUAL WINDOW ADJUSTMENT =====
+let adjusting = false;
+let adjustDrag = null; // { startX, startY, origBounds }
+
+function renderDetectionUI() {
+  const badge = document.getElementById('detectionBadge');
+  const link = document.getElementById('adjustLink');
+  if (!badge || !link) return;
+
+  if (S.photo && S.windowBounds) {
+    const pct = Math.round(S.windowDetectionConfidence * 100);
+    badge.innerHTML = `<span class="detection-badge detected">
+      <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--sage)"/></svg>
+      Window detected (${pct}%)
+    </span>`;
+    link.innerHTML = '<span class="adjust-link" onclick="startAdjust()">Tap to adjust window position</span>';
+  } else if (S.photo) {
+    badge.innerHTML = '<span class="detection-badge default">Using default placement</span>';
+    link.innerHTML = '<span class="adjust-link" onclick="startAdjust()">Tap to set window position</span>';
+  } else {
+    badge.innerHTML = '';
+    link.innerHTML = '';
+  }
+}
+
+function startAdjust() {
+  adjusting = true;
+  const overlay = document.getElementById('adjustOverlay');
+  const preview = document.getElementById('previewCanvas');
+  overlay.classList.remove('hidden');
+  overlay.width = preview.width;
+  overlay.height = preview.height;
+  overlay.style.width = preview.style.width;
+  overlay.style.height = preview.style.height;
+
+  // Initialize bounds if none exist
+  if (!S.windowBounds) {
+    S.windowBounds = { x: 0.2, y: 0.18, w: 0.6, h: 0.45 };
+  }
+
+  drawAdjustRect();
+
+  const link = document.getElementById('adjustLink');
+  link.innerHTML = '<button class="adjust-done-btn" onclick="finishAdjust()">Done Adjusting</button>';
+
+  // Touch handlers
+  overlay.addEventListener('touchstart', handleAdjustStart, { passive: false });
+  overlay.addEventListener('touchmove', handleAdjustMove, { passive: false });
+  overlay.addEventListener('touchend', handleAdjustEnd);
+  // Mouse fallback for desktop testing
+  overlay.addEventListener('mousedown', handleAdjustMouseDown);
+  overlay.addEventListener('mousemove', handleAdjustMouseMove);
+  overlay.addEventListener('mouseup', handleAdjustMouseUp);
+}
+
+function finishAdjust() {
+  adjusting = false;
+  const overlay = document.getElementById('adjustOverlay');
+  overlay.classList.add('hidden');
+  overlay.removeEventListener('touchstart', handleAdjustStart);
+  overlay.removeEventListener('touchmove', handleAdjustMove);
+  overlay.removeEventListener('touchend', handleAdjustEnd);
+  overlay.removeEventListener('mousedown', handleAdjustMouseDown);
+  overlay.removeEventListener('mousemove', handleAdjustMouseMove);
+  overlay.removeEventListener('mouseup', handleAdjustMouseUp);
+
+  S.windowDetectionConfidence = 1.0; // User confirmed
+  drawPreview();
+  renderDetectionUI();
+}
+
+function drawAdjustRect() {
+  const overlay = document.getElementById('adjustOverlay');
+  const ctx = overlay.getContext('2d');
+  const dpr = devicePixelRatio || 1;
+  const cw = parseFloat(overlay.style.width);
+  const ch = parseFloat(overlay.style.height);
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  ctx.scale(dpr, dpr);
+
+  if (!S.windowBounds) { ctx.setTransform(1,0,0,1,0,0); return; }
+
+  const b = S.windowBounds;
+  const rx = b.x * cw, ry = b.y * ch, rw = b.w * cw, rh = b.h * ch;
+
+  // Semi-transparent dark outside the rectangle
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.clearRect(rx, ry, rw, rh);
+
+  // Dashed rectangle border
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(rx, ry, rw, rh);
+  ctx.setLineDash([]);
+
+  // Corner handles (44×44 touch targets, drawn as 12px visible circles)
+  const corners = [
+    [rx, ry], [rx + rw, ry],
+    [rx, ry + rh], [rx + rw, ry + rh]
+  ];
+  corners.forEach(([cx, cy]) => {
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'var(--terracotta, #C2705A)';
+    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Label
+  ctx.fillStyle = '#fff';
+  ctx.font = '600 11px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Drag corners to adjust', rx + rw / 2, ry + rh / 2 + 4);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function getAdjustCoords(e, overlay) {
+  const rect = overlay.getBoundingClientRect();
+  const cw = parseFloat(overlay.style.width);
+  const ch = parseFloat(overlay.style.height);
+  const touch = e.touches ? e.touches[0] : e;
+  return {
+    nx: (touch.clientX - rect.left) / cw,
+    ny: (touch.clientY - rect.top) / ch
+  };
+}
+
+function findNearestCorner(nx, ny) {
+  if (!S.windowBounds) return null;
+  const b = S.windowBounds;
+  const corners = [
+    { id: 'tl', x: b.x, y: b.y },
+    { id: 'tr', x: b.x + b.w, y: b.y },
+    { id: 'bl', x: b.x, y: b.y + b.h },
+    { id: 'br', x: b.x + b.w, y: b.y + b.h },
+  ];
+  let closest = null, minDist = 0.08; // threshold ~8% of image
+  corners.forEach(c => {
+    const d = Math.sqrt((nx - c.x) ** 2 + (ny - c.y) ** 2);
+    if (d < minDist) { minDist = d; closest = c.id; }
+  });
+  // Also check if inside rectangle for move
+  if (!closest && nx > b.x && nx < b.x + b.w && ny > b.y && ny < b.y + b.h) {
+    closest = 'move';
+  }
+  return closest;
+}
+
+function handleAdjustStart(e) {
+  e.preventDefault();
+  const overlay = document.getElementById('adjustOverlay');
+  const { nx, ny } = getAdjustCoords(e, overlay);
+  const corner = findNearestCorner(nx, ny);
+  if (corner) {
+    adjustDrag = { corner, startNx: nx, startNy: ny, origBounds: { ...S.windowBounds } };
+  }
+}
+
+function handleAdjustMove(e) {
+  if (!adjustDrag) return;
+  e.preventDefault();
+  const overlay = document.getElementById('adjustOverlay');
+  const { nx, ny } = getAdjustCoords(e, overlay);
+  const ob = adjustDrag.origBounds;
+  const dx = nx - adjustDrag.startNx;
+  const dy = ny - adjustDrag.startNy;
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  if (adjustDrag.corner === 'move') {
+    S.windowBounds.x = clamp(ob.x + dx, 0, 1 - ob.w);
+    S.windowBounds.y = clamp(ob.y + dy, 0, 1 - ob.h);
+  } else if (adjustDrag.corner === 'tl') {
+    S.windowBounds.x = clamp(ob.x + dx, 0, ob.x + ob.w - 0.1);
+    S.windowBounds.y = clamp(ob.y + dy, 0, ob.y + ob.h - 0.1);
+    S.windowBounds.w = ob.x + ob.w - S.windowBounds.x;
+    S.windowBounds.h = ob.y + ob.h - S.windowBounds.y;
+  } else if (adjustDrag.corner === 'tr') {
+    S.windowBounds.w = clamp(ob.w + dx, 0.1, 1 - ob.x);
+    S.windowBounds.y = clamp(ob.y + dy, 0, ob.y + ob.h - 0.1);
+    S.windowBounds.h = ob.y + ob.h - S.windowBounds.y;
+  } else if (adjustDrag.corner === 'bl') {
+    S.windowBounds.x = clamp(ob.x + dx, 0, ob.x + ob.w - 0.1);
+    S.windowBounds.w = ob.x + ob.w - S.windowBounds.x;
+    S.windowBounds.h = clamp(ob.h + dy, 0.1, 1 - ob.y);
+  } else if (adjustDrag.corner === 'br') {
+    S.windowBounds.w = clamp(ob.w + dx, 0.1, 1 - ob.x);
+    S.windowBounds.h = clamp(ob.h + dy, 0.1, 1 - ob.y);
+  }
+
+  drawAdjustRect();
+  drawPreview();
+}
+
+function handleAdjustEnd() { adjustDrag = null; }
+
+// Mouse fallbacks for desktop testing
+function handleAdjustMouseDown(e) { handleAdjustStart(e); }
+function handleAdjustMouseMove(e) { if (adjustDrag) handleAdjustMove(e); }
+function handleAdjustMouseUp(e) { handleAdjustEnd(); }
 
 // ===== SHARING =====
 async function shareResults() {
@@ -1370,7 +1797,7 @@ function copyToClipboard(text) {
 
 function startOver() {
   S.photo = null; S.width = 0; S.length = 'floor'; S.style = 'rod-pocket';
-  S.fullness = 2; S.pattern = 'solid';
+  S.fullness = 2; S.pattern = 'solid'; S.windowBounds = null; S.windowDetectionConfidence = 0;
   document.getElementById('widthInput').value = '';
   document.getElementById('bottomNav').style.display = '';
   renderQuickpicks();
