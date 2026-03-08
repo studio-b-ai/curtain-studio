@@ -1387,103 +1387,206 @@ function detectWindowBounds(photoDataUrl) {
       octx.drawImage(img, 0, 0, sw, sh);
       const pixels = octx.getImageData(0, 0, sw, sh).data;
 
-      // 2. Grayscale luminance
+      // 2. Extract channels: luminance + blue ratio (sky detection)
       const lum = new Float32Array(sw * sh);
+      const blueRatio = new Float32Array(sw * sh);
       for (let i = 0; i < sw * sh; i++) {
         const r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2];
         lum[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+        const total = r + g + b;
+        // Blue ratio: how "blue" is this pixel relative to its brightness
+        // Sky typically has b/(r+g+b) > 0.36, interior walls < 0.33
+        blueRatio[i] = total > 30 ? (b / total) * 255 : 0;
       }
 
-      // 3. Build integral images for brightness and edges
+      // 3. Build integral images: brightness, blue channel, directional edges
       const intImg = buildIntegralImage(lum, sw, sh);
-      const edges = computeSobelEdges(lum, sw, sh);
-      const intEdge = buildIntegralImage(edges, sw, sh);
+      const intBlue = buildIntegralImage(blueRatio, sw, sh);
+      const { horiz: edgesH, vert: edgesV, combined: edgesC } = computeDirectionalEdges(lum, sw, sh);
+      const intEdge = buildIntegralImage(edgesC, sw, sh);
+      const intEdgeH = buildIntegralImage(edgesH, sw, sh);
+      const intEdgeV = buildIntegralImage(edgesV, sw, sh);
 
-      // 4. Total image brightness for contrast scoring
+      // 4. Total image stats for contrast scoring
       const totalPixels = sw * sh;
       const totalBrightness = queryRect(intImg, 0, 0, sw - 1, sh - 1, sw);
+      const totalBlue = queryRect(intBlue, 0, 0, sw - 1, sh - 1, sw);
 
-      // 5. Scan candidate rectangles
-      const stepX = Math.max(2, Math.round(sw * 0.05));
-      const stepY = Math.max(2, Math.round(sh * 0.05));
-      let best = null;
-      let bestScore = -1;
+      // 5. PASS 1: Coarse scan (5% grid) — find top 5 candidates
+      const coarseStepX = Math.max(2, Math.round(sw * 0.05));
+      const coarseStepY = Math.max(2, Math.round(sh * 0.05));
+      const topN = [];
 
-      for (let y = 0; y < sh * 0.65; y += stepY) {
-        for (let x = 0; x < sw * 0.75; x += stepX) {
-          for (let rw = Math.round(sw * 0.15); rw <= Math.min(sw * 0.85, sw - x); rw += stepX) {
-            for (let rh = Math.round(sh * 0.15); rh <= Math.min(sh * 0.7, sh - y); rh += stepY) {
-              const x2 = x + rw - 1, y2 = y + rh - 1;
-              if (x2 >= sw || y2 >= sh) continue;
+      function scoreCandidate(x, y, rw, rh) {
+        const x2 = x + rw - 1, y2 = y + rh - 1;
+        if (x2 >= sw || y2 >= sh) return -1;
 
-              // Brightness contrast: inside vs outside
-              const area = rw * rh;
-              const insideBright = queryRect(intImg, x, y, x2, y2, sw);
-              const outsideBright = totalBrightness - insideBright;
-              const outsideArea = totalPixels - area;
-              const avgIn = insideBright / area;
-              const avgOut = outsideArea > 0 ? outsideBright / outsideArea : 128;
-              const contrast = avgOut > 0 ? avgIn / avgOut : 0;
-              const brightnessScore = Math.min(contrast / 2.0, 1.0);
+        const area = rw * rh;
+        const insideBright = queryRect(intImg, x, y, x2, y2, sw);
+        const outsideBright = totalBrightness - insideBright;
+        const outsideArea = totalPixels - area;
+        const avgIn = insideBright / area;
+        const avgOut = outsideArea > 0 ? outsideBright / outsideArea : 128;
+        const contrast = avgOut > 0 ? avgIn / avgOut : 0;
+        const brightnessScore = Math.min(contrast / 2.0, 1.0);
 
-              // Edge strength at boundaries (strong edges = window frame)
-              const edgeBand = Math.max(2, Math.round(Math.min(rw, rh) * 0.08));
-              let edgeSum = 0, edgeCount = 0;
-              // Top edge
-              if (y > 0 && y + edgeBand - 1 < sh) {
-                edgeSum += queryRect(intEdge, x, y, x2, Math.min(y + edgeBand - 1, y2), sw);
-                edgeCount += rw * edgeBand;
-              }
-              // Bottom edge
-              if (y2 - edgeBand + 1 >= y) {
-                edgeSum += queryRect(intEdge, x, Math.max(y2 - edgeBand + 1, y), x2, y2, sw);
-                edgeCount += rw * edgeBand;
-              }
-              // Left edge
-              if (x + edgeBand - 1 <= x2) {
-                edgeSum += queryRect(intEdge, x, y, Math.min(x + edgeBand - 1, x2), y2, sw);
-                edgeCount += edgeBand * rh;
-              }
-              // Right edge
-              if (x2 - edgeBand + 1 >= x) {
-                edgeSum += queryRect(intEdge, Math.max(x2 - edgeBand + 1, x), y, x2, y2, sw);
-                edgeCount += edgeBand * rh;
-              }
-              const avgEdge = edgeCount > 0 ? edgeSum / edgeCount : 0;
-              const edgeScore = Math.min(avgEdge / 80, 1.0);
+        // Blue channel: windows showing sky have higher blue ratio inside vs outside
+        const insideBlue = queryRect(intBlue, x, y, x2, y2, sw);
+        const outsideBlue = totalBlue - insideBlue;
+        const avgBlueIn = insideBlue / area;
+        const avgBlueOut = outsideArea > 0 ? outsideBlue / outsideArea : 85;
+        const blueContrast = avgBlueOut > 0 ? avgBlueIn / avgBlueOut : 1;
+        // Score: >1.1 means inside is bluer than outside (likely sky)
+        const blueScore = Math.min(Math.max(blueContrast - 0.9, 0) / 0.5, 1.0);
 
-              // Aspect ratio plausibility (windows are 0.5–3.0)
-              const ar = rw / rh;
-              let aspectScore;
-              if (ar >= 0.6 && ar <= 2.5) aspectScore = 1.0;
-              else if (ar >= 0.4 && ar <= 3.5) aspectScore = 0.5;
-              else aspectScore = 0.1;
+        // Directional edge scoring: window frames have strong horizontal edges
+        // at top/bottom and strong vertical edges at sides
+        const edgeBand = Math.max(2, Math.round(Math.min(rw, rh) * 0.08));
+        let dirEdgeScore = 0;
 
-              // Position: prefer centered, upper-middle of image
-              const cx = (x + rw / 2) / sw;
-              const cy = (y + rh / 2) / sh;
-              const posScore = Math.exp(-2 * ((cx - 0.5) ** 2 + (cy - 0.38) ** 2));
+        // Top/bottom should have strong HORIZONTAL edges (frame/sill)
+        if (y + edgeBand - 1 < sh) {
+          const topHoriz = queryRect(intEdgeH, x, y, x2, Math.min(y + edgeBand - 1, y2), sw);
+          dirEdgeScore += topHoriz / (rw * edgeBand);
+        }
+        if (y2 - edgeBand + 1 >= y) {
+          const botHoriz = queryRect(intEdgeH, x, Math.max(y2 - edgeBand + 1, y), x2, y2, sw);
+          dirEdgeScore += botHoriz / (rw * edgeBand);
+        }
+        // Left/right should have strong VERTICAL edges (frame sides)
+        if (x + edgeBand - 1 <= x2) {
+          const leftVert = queryRect(intEdgeV, x, y, Math.min(x + edgeBand - 1, x2), y2, sw);
+          dirEdgeScore += leftVert / (edgeBand * rh);
+        }
+        if (x2 - edgeBand + 1 >= x) {
+          const rightVert = queryRect(intEdgeV, Math.max(x2 - edgeBand + 1, x), y, x2, y2, sw);
+          dirEdgeScore += rightVert / (edgeBand * rh);
+        }
+        const edgeScore = Math.min(dirEdgeScore / 200, 1.0);
 
-              // Size score: prefer moderately sized (not tiny, not huge)
-              const areaFrac = area / totalPixels;
-              const sizeScore = areaFrac >= 0.05 && areaFrac <= 0.6 ? 1.0 :
-                                areaFrac >= 0.02 ? 0.5 : 0.2;
+        // Brightness uniformity: windows tend to have more uniform brightness inside
+        // Use variance approximation via integral image
+        const meanIn = avgIn;
+        let varianceApprox = 0;
+        const sampleStep = Math.max(1, Math.floor(Math.min(rw, rh) / 5));
+        let sampleCount = 0;
+        for (let sy = y; sy <= y2; sy += sampleStep) {
+          for (let sx = x; sx <= x2; sx += sampleStep) {
+            const v = lum[sy * sw + sx] - meanIn;
+            varianceApprox += v * v;
+            sampleCount++;
+          }
+        }
+        varianceApprox = sampleCount > 0 ? Math.sqrt(varianceApprox / sampleCount) : 50;
+        // Low variance = more uniform = more likely a window or sky
+        const uniformScore = Math.max(0, 1.0 - varianceApprox / 80);
 
-              // Weighted total
-              const score = brightnessScore * 0.45
-                          + edgeScore * 0.2
-                          + aspectScore * 0.12
-                          + posScore * 0.13
-                          + sizeScore * 0.1;
+        // Aspect ratio plausibility (windows are typically 0.5–3.0)
+        const ar = rw / rh;
+        let aspectScore;
+        if (ar >= 0.6 && ar <= 2.5) aspectScore = 1.0;
+        else if (ar >= 0.4 && ar <= 3.5) aspectScore = 0.5;
+        else aspectScore = 0.1;
 
-              if (score > bestScore) {
-                bestScore = score;
-                best = { x: x / sw, y: y / sh, w: rw / sw, h: rh / sh, confidence: score };
+        // Position: prefer centered, upper-middle of image
+        const cx = (x + rw / 2) / sw;
+        const cy = (y + rh / 2) / sh;
+        const posScore = Math.exp(-2 * ((cx - 0.5) ** 2 + (cy - 0.38) ** 2));
+
+        // Size score: prefer moderately sized (not tiny, not huge)
+        const areaFrac = area / totalPixels;
+        const sizeScore = areaFrac >= 0.05 && areaFrac <= 0.6 ? 1.0 :
+                          areaFrac >= 0.02 ? 0.5 : 0.2;
+
+        // Weighted total — 7 factors
+        return brightnessScore * 0.28
+             + blueScore * 0.12
+             + edgeScore * 0.20
+             + uniformScore * 0.07
+             + aspectScore * 0.10
+             + posScore * 0.10
+             + sizeScore * 0.13;
+      }
+
+      // Coarse scan
+      for (let y = 0; y < sh * 0.65; y += coarseStepY) {
+        for (let x = 0; x < sw * 0.75; x += coarseStepX) {
+          for (let rw = Math.round(sw * 0.15); rw <= Math.min(sw * 0.85, sw - x); rw += coarseStepX) {
+            for (let rh = Math.round(sh * 0.15); rh <= Math.min(sh * 0.7, sh - y); rh += coarseStepY) {
+              const score = scoreCandidate(x, y, rw, rh);
+              if (score < 0) continue;
+              // Keep top 5 candidates
+              if (topN.length < 5 || score > topN[topN.length - 1].score) {
+                topN.push({ x, y, rw, rh, score });
+                topN.sort((a, b) => b.score - a.score);
+                if (topN.length > 5) topN.length = 5;
               }
             }
           }
         }
       }
+
+      // 6. PASS 2: Fine refinement around each top candidate
+      // Use wider search range for height (windows are often taller than coarse grid catches)
+      const fineStepX = Math.max(1, Math.round(sw * 0.015));
+      const fineStepY = Math.max(1, Math.round(sh * 0.015));
+      let best = null;
+      let bestScore = -1;
+
+      for (const cand of topN) {
+        const padXY = Math.round(sw * 0.08); // ±8% for position
+        const padSize = Math.round(sw * 0.12); // ±12% for size (wider to catch full height)
+        const yMin = Math.max(0, cand.y - padXY);
+        const yMax = Math.min(Math.round(sh * 0.65), cand.y + padXY);
+        const xMin = Math.max(0, cand.x - padXY);
+        const xMax = Math.min(Math.round(sw * 0.75), cand.x + padXY);
+        const rwMin = Math.max(Math.round(sw * 0.15), cand.rw - padSize);
+        const rwMax = Math.min(sw, cand.rw + padSize);
+        const rhMin = Math.max(Math.round(sh * 0.15), cand.rh - padSize);
+        const rhMax = Math.min(sh, cand.rh + Math.round(sh * 0.25)); // allow much taller
+
+        for (let y = yMin; y <= yMax; y += fineStepY) {
+          for (let x = xMin; x <= xMax; x += fineStepX) {
+            for (let rw = rwMin; rw <= Math.min(rwMax, sw - x); rw += fineStepX) {
+              for (let rh = rhMin; rh <= Math.min(rhMax, sh - y); rh += fineStepY) {
+                const score = scoreCandidate(x, y, rw, rh);
+                if (score > bestScore) {
+                  bestScore = score;
+                  best = { x: x / sw, y: y / sh, w: rw / sw, h: rh / sh, confidence: score };
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 7. PASS 3: Sill detection — extend bottom edge to nearest strong horizontal edge
+      if (best) {
+        const bx = Math.round(best.x * sw), by = Math.round(best.y * sh);
+        const bw = Math.round(best.w * sw), bh = Math.round(best.h * sh);
+        const bot = by + bh;
+        let bestSillY = bot;
+        let bestSillStrength = 0;
+        // Scan downward from current bottom, looking for a strong horizontal edge (sill)
+        for (let sy = bot; sy < Math.min(bot + Math.round(sh * 0.3), sh - 1); sy++) {
+          const edgeStr = queryRect(intEdgeH, bx, sy, Math.min(bx + bw - 1, sw - 1), Math.min(sy + 2, sh - 1), sw);
+          const avgStr = edgeStr / (bw * 3);
+          if (avgStr > bestSillStrength && avgStr > 15) {
+            bestSillStrength = avgStr;
+            bestSillY = sy;
+          }
+        }
+        // If we found a sill below, extend and re-score
+        if (bestSillY > bot + 2) {
+          const extH = bestSillY - by;
+          const extScore = scoreCandidate(bx, by, bw, extH);
+          if (extScore > bestScore * 0.85) { // accept if at least 85% as good
+            best = { x: bx / sw, y: by / sh, w: bw / sw, h: extH / sh, confidence: Math.max(extScore, bestScore) };
+            bestScore = Math.max(extScore, bestScore);
+          }
+        }
+      }
+
       resolve(best);
     };
     img.onerror = () => resolve(null);
@@ -1511,8 +1614,13 @@ function queryRect(int, x1, y1, x2, y2, w) {
   return d - b - c + a;
 }
 
-function computeSobelEdges(lum, w, h) {
-  const edges = new Float32Array(w * h);
+// Directional Sobel: separate horizontal and vertical edge responses
+// Horizontal edges (gy) detect window frame top/bottom + sill
+// Vertical edges (gx) detect window frame sides
+function computeDirectionalEdges(lum, w, h) {
+  const horiz = new Float32Array(w * h);
+  const vert = new Float32Array(w * h);
+  const combined = new Float32Array(w * h);
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const gx = -lum[(y - 1) * w + (x - 1)] + lum[(y - 1) * w + (x + 1)]
@@ -1520,10 +1628,12 @@ function computeSobelEdges(lum, w, h) {
                - lum[(y + 1) * w + (x - 1)] + lum[(y + 1) * w + (x + 1)];
       const gy = -lum[(y - 1) * w + (x - 1)] - 2 * lum[(y - 1) * w + x] - lum[(y - 1) * w + (x + 1)]
                + lum[(y + 1) * w + (x - 1)] + 2 * lum[(y + 1) * w + x] + lum[(y + 1) * w + (x + 1)];
-      edges[y * w + x] = Math.sqrt(gx * gx + gy * gy);
+      vert[y * w + x] = Math.abs(gx);
+      horiz[y * w + x] = Math.abs(gy);
+      combined[y * w + x] = Math.sqrt(gx * gx + gy * gy);
     }
   }
-  return edges;
+  return { horiz, vert, combined };
 }
 
 function runWindowDetection(photoUrl) {
