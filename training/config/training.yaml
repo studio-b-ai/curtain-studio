@@ -1,0 +1,51 @@
+segmentation:
+  model: yolov8n-seg
+  epochs: 100
+  imgsz: 640
+  batch: 16
+  patience: 20
+  data_sources:
+    - openimages_v7
+    - ade20k
+    - prolific
+  export:
+    format: onnx
+    simplify: true
+
+estimation:
+  depth_model: metric3d_v2_vit_small
+  regression:
+    hidden_layers: [256, 128, 64]
+    dropout: 0.2
+    learning_rate: 0.001
+    epochs: 200
+    batch_size: 32
+  features:
+    - window_pixel_width
+    - window_pixel_height
+    - window_pixel_area_ratio
+    - depth_at_corners
+    - depth_at_edges
+    - depth_mean_window
+    - depth_mean_surround
+    - focal_length_mm
+    - sensor_width_mm
+    - image_width_px
+    - image_height_px
+  export:
+    format: onnx
+
+data:
+  prolific_dir: data/prolific
+  synthetic_dir: data/synthetic
+  openimages_dir: data/openimages
+  customer_dir: data/customer
+  val_split: 0.15
+  test_split: 0.15
+
+quality:
+  min_exif_fields: [FocalLength, Model]
+  width_range: [12, 120]
+  height_range: [12, 96]
+  consistency_threshold_inches: 3
+  rejection_budget: 0.20
