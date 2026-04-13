@@ -39,14 +39,21 @@ export async function estimateDimensions(imageBase64, windowBounds, exif, sizes)
  * Submit user feedback on measurement accuracy (non-blocking)
  * @param {{ estimatedWidth: number, estimatedHeight: number, actualWidth?: number, actualHeight?: number, confidence: number, method: string, accepted: boolean, adjusted: boolean, consentToStore: boolean, imageBase64?: string, windowBounds?: object, exif?: object }} feedbackData
  */
-export async function submitFeedback(feedbackData) {
-  try {
-    await fetch(`${API_URL}/feedback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(feedbackData),
-    });
-  } catch (e) {
-    console.warn('[Estimation] Feedback submission failed:', e.message);
+export function submitFeedback(feedbackData) {
+  const url = `${API_URL}/feedback`;
+  const body = JSON.stringify(feedbackData);
+
+  // Use sendBeacon if available — survives page navigation
+  if (navigator.sendBeacon) {
+    const blob = new Blob([body], { type: 'application/json' });
+    navigator.sendBeacon(url, blob);
+    return;
   }
+
+  // Fallback to fetch (may be aborted on navigation)
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  }).catch(err => console.warn('Feedback submission failed:', err));
 }
