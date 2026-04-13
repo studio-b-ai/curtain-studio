@@ -871,6 +871,8 @@ function goToStep(n) {
   }
   if (n === 4) {
     requestAnimationFrame(() => requestAnimationFrame(() => { renderResults(); }));
+    const consentLabel = document.querySelector('.consent-label');
+    if (consentLabel) consentLabel.style.display = S.measurementMethod === 'manual' ? 'none' : '';
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -999,21 +1001,17 @@ window.retakePhoto = function() {
 };
 
 window.triggerFileUpload = function() { document.getElementById('fileInput').click(); };
-window.handleFileSelect = function(e) {
-  const f = e.target.files[0]; if (!f) return;
-  const r = new FileReader();
-  r.onload = ev => {
-    S.photo = ev.target.result;
-    runWindowDetection(ev.target.result);
-    document.getElementById('noCamera').innerHTML = `
-      <div style="position:relative; width:100%; aspect-ratio:3/4; border-radius:var(--radius-lg); overflow:hidden; margin-bottom:16px;">
-        <img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;" alt="Your window">
-      </div>
-      <button class="btn btn-secondary btn-block" onclick="retakeFile()">Choose Different Photo</button>
-    `;
-    document.getElementById('nextBtn').textContent = 'Continue';
-  };
-  r.readAsDataURL(f);
+window.handleFileSelect = async function(e) {
+  const dataUrl = await handleFileSelectModule(e, S);
+  if (!dataUrl) return;
+  runWindowDetection(dataUrl);
+  document.getElementById('noCamera').innerHTML = `
+    <div style="position:relative; width:100%; aspect-ratio:3/4; border-radius:var(--radius-lg); overflow:hidden; margin-bottom:16px;">
+      <img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;" alt="Your window">
+    </div>
+    <button class="btn btn-secondary btn-block" onclick="retakeFile()">Choose Different Photo</button>
+  `;
+  document.getElementById('nextBtn').textContent = 'Continue';
 };
 
 window.retakeFile = function() {
