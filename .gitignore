@@ -1,0 +1,23 @@
+# Data (lives in GCS, not git)
+data/prolific/
+data/synthetic/
+data/openimages/
+data/customer/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Models (large binaries)
+server/models/*.onnx
+app/models/*.json
+app/models/*.bin
+
+# OS
+.DS_Store
