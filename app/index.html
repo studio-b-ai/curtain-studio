@@ -497,6 +497,13 @@ body {
   margin: 0 auto 1rem;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.consent-label {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 0.8rem; color: #666;
+  margin: 1rem 0; padding: 0.75rem;
+  background: #f9f9f7; border-radius: 8px;
+}
+.consent-label input { margin-top: 2px; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -714,6 +721,11 @@ body {
       <div class="detail-header">Cut Sheet for Your Fabric Shop</div>
       <div class="detail-body" id="cutSheetBody"></div>
     </div>
+
+    <label class="consent-label">
+      <input type="checkbox" id="consentStore">
+      <span>Help us improve — allow anonymous use of your photo to make measurements more accurate</span>
+    </label>
 
     <div class="result-actions" id="resultActions"></div>
   </div>
@@ -1446,6 +1458,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const sliderH = document.getElementById('sliderHeight');
   if (sliderW) sliderW.addEventListener('input', () => { const v = parseFloat(sliderW.value); S.width = v; document.getElementById('sliderWidthVal').textContent = v; document.getElementById('estWidth').textContent = v; });
   if (sliderH) sliderH.addEventListener('input', () => { const v = parseFloat(sliderH.value); S.height = v; document.getElementById('sliderHeightVal').textContent = v; document.getElementById('estHeight').textContent = v; });
+  // Wire privacy consent checkbox
+  const consentBox = document.getElementById('consentStore');
+  if (consentBox) consentBox.addEventListener('change', () => { S.consentToStore = consentBox.checked; });
 });
 </script>
 </body>
