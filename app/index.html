@@ -9,6 +9,7 @@
 <title>Ästhetik — Curtain Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -443,6 +444,59 @@ body {
 .detection-badge.default { background: rgba(154,149,140,0.12); color: var(--text-muted); }
 
 .hidden { display: none !important; }
+
+/* === AI ESTIMATION === */
+.estimate-display {
+  text-align: center;
+  padding: 1.5rem;
+  background: var(--bg);
+  border-radius: 12px;
+  margin-bottom: 1rem;
+}
+.estimate-label { font-size: 0.9rem; color: #888; margin-bottom: 0.25rem; }
+.estimate-value {
+  font-family: 'DM Serif Display', Georgia, serif;
+  font-size: 2.5rem;
+  color: var(--terracotta);
+  margin: 0.5rem 0;
+}
+.confidence-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.confidence-badge.high { background: #e8f5e9; color: #2e7d32; }
+.confidence-badge.low { background: #fff3e0; color: #e65100; }
+.custom-gate {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 12px;
+  padding: 1rem;
+  margin: 1rem 0;
+  text-align: center;
+}
+.size-bracket {
+  text-align: center;
+  padding: 0.75rem;
+  background: #e8f5e9;
+  border-radius: 8px;
+  margin: 0.5rem 0;
+}
+.slider-group { margin: 1rem 0; }
+.slider-group label { display: block; font-size: 0.9rem; margin-bottom: 4px; }
+.slider-group input[type="range"] { width: 100%; accent-color: var(--terracotta); }
+.analyzing { text-align: center; padding: 3rem 1rem; }
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid #eee;
+  border-top-color: var(--terracotta);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 1rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -522,36 +576,74 @@ body {
   <!-- STEP 2: MEASURE -->
   <div class="step" id="step2">
     <div class="step-eyebrow">Measure</div>
-    <h1 class="step-title">How Wide Is It?</h1>
-    <p class="step-desc">We just need the width of your window. Measure inside the frame, left to right.</p>
+    <h1 class="step-title">Window Size</h1>
+    <p class="step-desc" id="step2Desc">We just need the width of your window. Measure inside the frame, left to right.</p>
 
-    <div class="size-quickpick">
-      <div class="quickpick-grid" id="quickpickGrid"></div>
-    </div>
+    <!-- AI Result -->
+    <div class="ai-result" id="aiResult" style="display:none">
+      <div class="estimate-display">
+        <p class="estimate-label">Your window is approximately</p>
+        <div class="estimate-value">
+          <span id="estWidth">48</span>" &times; <span id="estHeight">36</span>"
+        </div>
+        <div class="confidence-badge" id="confidenceBadge">High confidence</div>
+      </div>
 
-    <div class="or-divider">or type it in</div>
+      <div class="custom-gate" id="customGate" style="display:none">
+        <p><strong>Custom Order — Please Confirm</strong></p>
+        <p>For custom-cut orders, grab a tape measure and verify. Adjust the sliders if needed.</p>
+      </div>
 
-    <div class="input-group">
-      <label class="input-label">Window Width</label>
-      <div class="input-row">
-        <input type="number" class="input-field" id="widthInput" placeholder="0" min="12" max="300" inputmode="numeric" pattern="[0-9]*">
-        <span class="input-unit">inches</span>
+      <div class="size-bracket" id="sizeBracket" style="display:none">
+        <p>Recommended size: <strong id="sizeCategory"></strong></p>
+      </div>
+
+      <div class="slider-group">
+        <label>Width: <span id="sliderWidthVal">48</span>"</label>
+        <input type="range" id="sliderWidth" min="12" max="120" step="0.5">
+      </div>
+      <div class="slider-group">
+        <label>Height: <span id="sliderHeightVal">36</span>"</label>
+        <input type="range" id="sliderHeight" min="12" max="96" step="0.5">
       </div>
     </div>
 
-    <div style="margin-top: 16px;">
-      <div class="how-to-toggle" id="howToToggle" onclick="toggleHowTo()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-        Not sure how to measure?
+    <!-- Loading state -->
+    <div class="analyzing" id="analyzing" style="display:none">
+      <div class="spinner"></div>
+      <p>Analyzing your window...</p>
+    </div>
+
+    <!-- Manual fallback (original Step 2 UI) -->
+    <div class="manual-input" id="manualInput">
+      <div class="size-quickpick">
+        <div class="quickpick-grid" id="quickpickGrid"></div>
       </div>
-      <div class="how-to-content" id="howToContent">
-        <div class="how-to-inner">
-          <ol>
-            <li>Grab a tape measure (or use a piece of string and a ruler).</li>
-            <li>Measure inside the window frame, from left side to right side.</li>
-            <li>Round to the nearest inch — close enough is perfect!</li>
-          </ol>
-          <p style="margin-top:8px; font-style:italic;">Don't worry about height — we'll figure that out from the curtain length you pick next.</p>
+
+      <div class="or-divider">or type it in</div>
+
+      <div class="input-group">
+        <label class="input-label">Window Width</label>
+        <div class="input-row">
+          <input type="number" class="input-field" id="widthInput" placeholder="0" min="12" max="300" inputmode="numeric" pattern="[0-9]*">
+          <span class="input-unit">inches</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px;">
+        <div class="how-to-toggle" id="howToToggle" onclick="toggleHowTo()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          Not sure how to measure?
+        </div>
+        <div class="how-to-content" id="howToContent">
+          <div class="how-to-inner">
+            <ol>
+              <li>Grab a tape measure (or use a piece of string and a ruler).</li>
+              <li>Measure inside the window frame, from left side to right side.</li>
+              <li>Round to the nearest inch — close enough is perfect!</li>
+            </ol>
+            <p style="margin-top:8px; font-style:italic;">Don't worry about height — we'll figure that out from the curtain length you pick next.</p>
+          </div>
         </div>
       </div>
     </div>
@@ -635,12 +727,19 @@ body {
   </div>
 </div>
 
-<script>
+<script type="module">
+import { initCamera as initCameraModule, capturePhoto as capturePhotoModule, flipCamera as flipCameraModule, retakePhoto as retakePhotoModule, handleFileSelect as handleFileSelectModule, extractExif } from './lib/camera.js';
+import { loadYOLOModel, detectWindow } from './lib/segmentation.js';
+import { estimateDimensions, submitFeedback } from './lib/estimation.js';
+import { parseShopifyParams as parseShopifyParamsModule, showShopifyContext as showShopifyContextModule, buildCartUrl } from './lib/shopify.js';
+import { checkLiDARSupport, measureWithLiDAR } from './lib/lidar.js';
+
 // ===== STATE =====
 const S = {
   step: 1, total: 4,
   photo: null,
   width: 0,
+  height: 0,
   length: 'floor',
   style: 'rod-pocket',
   fullness: 2,
@@ -648,8 +747,14 @@ const S = {
   color: '#C2705A',
   cameraFacing: 'environment', stream: null,
   shopify: null,
-  windowBounds: null,          // { x, y, w, h } normalized 0-1 from detection
+  windowBounds: null,
   windowDetectionConfidence: 0,
+  // AI estimation fields
+  measurementMethod: 'manual',  // 'manual' | 'ai' | 'lidar'
+  aiEstimate: null,             // { widthInches, heightInches }
+  confidence: 0,
+  consentToStore: false,
+  exif: null,
 };
 
 const SIZES = [
@@ -662,7 +767,7 @@ const SIZES = [
 ];
 
 const LENGTHS = [
-  { id: 'sill', name: 'Sill Length', desc: 'Ends right at the window sill — about 45″', finLen: () => 45, extra: 0 },
+  { id: 'sill', name: 'Sill Length', desc: 'Ends right at the window sill — about 45\u2033', finLen: () => 45, extra: 0 },
   { id: 'floor', name: 'Floor Length', desc: 'Hangs down to the floor — the most popular choice', badge: 'Popular', finLen: () => 84, extra: 0 },
   { id: 'puddle', name: 'Puddle', desc: 'Pools on the floor for a luxurious, romantic look', finLen: () => 90, extra: 6 },
 ];
@@ -674,9 +779,9 @@ const STYLES = [
 ];
 
 const FULLNESS_OPTS = [
-  { id: 1.5, name: 'Standard (1.5×)', desc: 'Clean, tailored folds', tag: null },
-  { id: 2, name: 'Full (2×)', desc: 'Rich, luxurious draping', tag: 'Popular', tc: 'tag-popular' },
-  { id: 2.5, name: 'Extra Full (2.5×)', desc: 'Ultra-lush, best for sheers', tag: 'Premium', tc: 'tag-premium' },
+  { id: 1.5, name: 'Standard (1.5\u00d7)', desc: 'Clean, tailored folds', tag: null },
+  { id: 2, name: 'Full (2\u00d7)', desc: 'Rich, luxurious draping', tag: 'Popular', tc: 'tag-popular' },
+  { id: 2.5, name: 'Extra Full (2.5\u00d7)', desc: 'Ultra-lush, best for sheers', tag: 'Premium', tc: 'tag-premium' },
 ];
 
 const PATTERNS = [
@@ -692,16 +797,9 @@ const ALLOW = { bottomHem: 8, sideHem: 2, overlap: 4 };
 
 // ===== SHOPIFY =====
 function parseShopifyParams() {
-  const p = new URLSearchParams(location.search);
-  if (p.has('product') || p.has('from')) {
-    S.shopify = {
-      product: p.get('product') || '',
-      color: p.get('color') || '',
-      variant: p.get('variant') || '',
-      handle: p.get('handle') || '',
-      returnUrl: p.get('return_url') || '',
-      from: p.get('from') || 'shopify',
-    };
+  const shopify = parseShopifyParamsModule();
+  if (shopify) {
+    S.shopify = shopify;
     if (S.shopify.color) {
       S.color = S.shopify.color.startsWith('#') ? S.shopify.color : '#' + S.shopify.color;
     }
@@ -709,23 +807,20 @@ function parseShopifyParams() {
 }
 
 function showShopifyContext() {
-  if (!S.shopify) return;
-  document.getElementById('shopifyBadge').style.display = '';
-  document.getElementById('shopifyContext').style.display = '';
-  document.getElementById('shopifySwatch').style.background = S.shopify.color || S.color;
-  document.getElementById('shopifyProduct').textContent = S.shopify.product || 'Selected Fabric';
-  document.getElementById('shopifyDetail').textContent = S.shopify.variant || 'From your Shopify cart';
+  showShopifyContextModule(S.shopify, S.color);
 }
 
 // ===== INIT =====
-function startApp() {
+window.startApp = function() {
   document.getElementById('splash').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   initCamera();
   renderQuickpicks();
   showShopifyContext();
   document.getElementById('nextBtn').textContent = 'Skip Photo';
-}
+  // Try loading YOLO model in background (non-blocking)
+  loadYOLOModel('./models/window-yolo/model.json').catch(() => {});
+};
 
 // ===== NAVIGATION =====
 function goToStep(n) {
@@ -734,14 +829,12 @@ function goToStep(n) {
   S.step = n;
   document.getElementById('headerStep').textContent = `Step ${n} of ${S.total}`;
 
-  // Progress dots
   document.querySelectorAll('.dot').forEach((d, i) => {
     d.className = 'dot';
     if (i + 1 === n) d.classList.add('active');
     else if (i + 1 < n) d.classList.add('done');
   });
 
-  // Nav buttons
   const back = document.getElementById('backBtn');
   const next = document.getElementById('nextBtn');
   back.classList.toggle('hidden', n === 1);
@@ -756,90 +849,149 @@ function goToStep(n) {
     else next.textContent = 'Continue';
   }
 
-  // Render step content when arriving
+  if (n === 2 && S.photo) {
+    onPhotoReady(S.photo);
+  }
   if (n === 3) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      renderLengthCards();
-      renderStyleCards();
-      renderFullnessCards();
-      renderPatternGrid();
+      renderLengthCards(); renderStyleCards(); renderFullnessCards(); renderPatternGrid();
     }));
   }
   if (n === 4) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      renderResults();
-    }));
+    requestAnimationFrame(() => requestAnimationFrame(() => { renderResults(); }));
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function nextStep() {
+window.nextStep = function() {
   if (S.step === 2) {
-    // Read width input
-    const inp = document.getElementById('widthInput');
-    const v = parseFloat(inp.value) || 0;
-    if (v > 0) S.width = v;
-    if (S.width <= 0) { alert('Please enter or select your window width to continue.'); return; }
+    if (document.getElementById('aiResult').style.display !== 'none') {
+      if (S.width <= 0) { alert('Please confirm your window width to continue.'); return; }
+    } else {
+      const inp = document.getElementById('widthInput');
+      const v = parseFloat(inp.value) || 0;
+      if (v > 0) S.width = v;
+      if (S.width <= 0) { alert('Please enter or select your window width to continue.'); return; }
+    }
   }
   if (S.step < S.total) goToStep(S.step + 1);
-}
-function prevStep() { if (S.step > 1) goToStep(S.step - 1); }
+};
+window.prevStep = function() { if (S.step > 1) goToStep(S.step - 1); };
 
-// ===== CAMERA =====
-async function initCamera() {
+// ===== AI ESTIMATION ORCHESTRATION =====
+async function onPhotoReady(photoDataUrl) {
+  document.getElementById('analyzing').style.display = '';
+  document.getElementById('aiResult').style.display = 'none';
+  document.getElementById('manualInput').style.display = 'none';
+  document.getElementById('step2Desc').textContent = 'Analyzing your photo to estimate window dimensions...';
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: S.cameraFacing, width: { ideal: 1080 }, height: { ideal: 1440 } } });
-    S.stream = stream;
-    document.getElementById('cameraFeed').srcObject = stream;
-  } catch (e) {
-    document.getElementById('cameraSection').classList.add('hidden');
-    document.getElementById('noCamera').classList.remove('hidden');
+    const [bounds, exif, hasLiDAR] = await Promise.all([
+      detectWindow(photoDataUrl),
+      Promise.resolve(extractExif(photoDataUrl)),
+      checkLiDARSupport(),
+    ]);
+
+    S.exif = exif;
+    if (bounds && bounds.confidence >= 0.3) {
+      S.windowBounds = { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h };
+      S.windowDetectionConfidence = bounds.confidence;
+    }
+
+    let result = null;
+    if (hasLiDAR) {
+      result = await measureWithLiDAR();
+      if (result) { showEstimate(result.widthInches, result.heightInches, result.confidence, 'lidar'); return; }
+    }
+
+    try {
+      const imageBase64 = photoDataUrl.split(',')[1] || '';
+      const sizes = S.shopify && S.shopify.sizes ? S.shopify.sizes : null;
+      result = await estimateDimensions(imageBase64, S.windowBounds, exif, sizes);
+      showEstimate(result.widthInches, result.heightInches, result.confidence, 'ai', result.sizeCategory);
+    } catch (apiErr) {
+      console.warn('[Estimation] API call failed, falling back to manual:', apiErr.message);
+      showManualFallback();
+    }
+  } catch (err) {
+    console.warn('[Estimation] Detection failed, falling back to manual:', err.message);
+    showManualFallback();
   }
 }
 
-async function flipCamera() {
-  S.cameraFacing = S.cameraFacing === 'environment' ? 'user' : 'environment';
-  if (S.stream) S.stream.getTracks().forEach(t => t.stop());
-  await initCamera();
+function showEstimate(width, height, confidence, method, sizeCategory) {
+  document.getElementById('analyzing').style.display = 'none';
+  document.getElementById('aiResult').style.display = '';
+  document.getElementById('manualInput').style.display = 'none';
+  document.getElementById('step2Desc').textContent = 'We estimated your window size from the photo. Adjust the sliders if needed.';
+
+  S.width = Math.round(width * 2) / 2;
+  S.height = Math.round(height * 2) / 2;
+  S.measurementMethod = method;
+  S.aiEstimate = { widthInches: width, heightInches: height };
+  S.confidence = confidence;
+
+  document.getElementById('estWidth').textContent = S.width;
+  document.getElementById('estHeight').textContent = S.height;
+
+  const badge = document.getElementById('confidenceBadge');
+  if (confidence >= 0.75) {
+    badge.textContent = 'High confidence';
+    badge.className = 'confidence-badge high';
+  } else {
+    badge.textContent = 'Low confidence \u2014 please verify';
+    badge.className = 'confidence-badge low';
+  }
+
+  if (S.shopify && S.shopify.type === 'custom') {
+    document.getElementById('customGate').style.display = '';
+  } else {
+    document.getElementById('customGate').style.display = 'none';
+  }
+
+  if (sizeCategory) {
+    document.getElementById('sizeBracket').style.display = '';
+    document.getElementById('sizeCategory').textContent = sizeCategory;
+  } else {
+    document.getElementById('sizeBracket').style.display = 'none';
+  }
+
+  const sliderW = document.getElementById('sliderWidth');
+  const sliderH = document.getElementById('sliderHeight');
+  sliderW.value = S.width;
+  sliderH.value = S.height;
+  document.getElementById('sliderWidthVal').textContent = S.width;
+  document.getElementById('sliderHeightVal').textContent = S.height;
 }
 
-function capturePhoto() {
-  const v = document.getElementById('cameraFeed');
-  const c = document.createElement('canvas');
-  c.width = v.videoWidth; c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0);
-  const url = c.toDataURL('image/jpeg', 0.85);
-  S.photo = url;
-  // Run window detection in background — results ready by Step 4
+function showManualFallback() {
+  document.getElementById('analyzing').style.display = 'none';
+  document.getElementById('aiResult').style.display = 'none';
+  document.getElementById('manualInput').style.display = '';
+  document.getElementById('step2Desc').textContent = 'We just need the width of your window. Measure inside the frame, left to right.';
+  S.measurementMethod = 'manual';
+}
+
+// ===== CAMERA =====
+async function initCamera() { await initCameraModule(S); }
+window.flipCamera = async function() { await flipCameraModule(S); };
+
+window.capturePhoto = function() {
+  const url = capturePhotoModule(S);
   runWindowDetection(url);
-  const img = document.getElementById('capturedPhoto');
-  img.src = url; img.style.display = 'block';
-  document.getElementById('cameraFeed').style.display = 'none';
-  document.getElementById('cameraGuideOverlay').style.display = 'none';
-  document.getElementById('shutterBtn').classList.add('hidden');
-  document.getElementById('flipCameraBtn').classList.add('hidden');
-  document.getElementById('retakeBtn').classList.remove('hidden');
-  document.getElementById('nextBtn').textContent = 'Continue';
-}
+};
 
-function retakePhoto() {
-  S.photo = null; S.windowBounds = null; S.windowDetectionConfidence = 0;
-  document.getElementById('capturedPhoto').style.display = 'none';
-  document.getElementById('cameraFeed').style.display = 'block';
-  document.getElementById('cameraGuideOverlay').style.display = 'flex';
-  document.getElementById('shutterBtn').classList.remove('hidden');
-  document.getElementById('flipCameraBtn').classList.remove('hidden');
-  document.getElementById('retakeBtn').classList.add('hidden');
-  document.getElementById('nextBtn').textContent = 'Skip Photo';
-}
+window.retakePhoto = function() {
+  retakePhotoModule(S);
+  S.aiEstimate = null; S.confidence = 0; S.measurementMethod = 'manual'; S.exif = null;
+};
 
-function triggerFileUpload() { document.getElementById('fileInput').click(); }
-function handleFileSelect(e) {
+window.triggerFileUpload = function() { document.getElementById('fileInput').click(); };
+window.handleFileSelect = function(e) {
   const f = e.target.files[0]; if (!f) return;
   const r = new FileReader();
   r.onload = ev => {
     S.photo = ev.target.result;
-    // Run window detection in background
     runWindowDetection(ev.target.result);
     document.getElementById('noCamera').innerHTML = `
       <div style="position:relative; width:100%; aspect-ratio:3/4; border-radius:var(--radius-lg); overflow:hidden; margin-bottom:16px;">
@@ -850,10 +1002,11 @@ function handleFileSelect(e) {
     document.getElementById('nextBtn').textContent = 'Continue';
   };
   r.readAsDataURL(f);
-}
+};
 
-function retakeFile() {
+window.retakeFile = function() {
   S.photo = null; S.windowBounds = null; S.windowDetectionConfidence = 0;
+  S.aiEstimate = null; S.confidence = 0; S.measurementMethod = 'manual'; S.exif = null;
   document.getElementById('noCamera').innerHTML = `
     <div class="photo-placeholder" onclick="triggerFileUpload()">
       <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="8" width="40" height="32" rx="4"/><circle cx="24" cy="24" r="8"/><circle cx="36" cy="14" r="2" fill="currentColor"/></svg>
@@ -862,7 +1015,7 @@ function retakeFile() {
     <input type="file" id="fileInput" accept="image/*" capture="environment" style="display:none" onchange="handleFileSelect(event)">
   `;
   document.getElementById('nextBtn').textContent = 'Skip Photo';
-}
+};
 
 // ===== QUICKPICK =====
 function renderQuickpicks() {
@@ -874,20 +1027,13 @@ function renderQuickpicks() {
     </div>
   `).join('');
 }
-
-function pickSize(w) {
-  S.width = w;
-  document.getElementById('widthInput').value = w;
-  renderQuickpicks();
-}
+window.pickSize = function(w) { S.width = w; document.getElementById('widthInput').value = w; renderQuickpicks(); };
 
 // ===== HOW-TO TOGGLE =====
-function toggleHowTo() {
-  const t = document.getElementById('howToToggle');
-  const c = document.getElementById('howToContent');
-  t.classList.toggle('open');
-  c.classList.toggle('open');
-}
+window.toggleHowTo = function() {
+  document.getElementById('howToToggle').classList.toggle('open');
+  document.getElementById('howToContent').classList.toggle('open');
+};
 
 // ===== LENGTH CARDS =====
 function renderLengthCards() {
@@ -895,62 +1041,28 @@ function renderLengthCards() {
   container.innerHTML = LENGTHS.map(l => {
     const sel = S.length === l.id ? ' selected' : '';
     const badge = l.badge ? `<span class="length-badge">${l.badge}</span>` : '';
-    return `
-      <div class="length-card${sel}" onclick="pickLength('${l.id}')">
-        <div class="length-icon-wrap"><canvas data-len="${l.id}" width="96" height="128"></canvas></div>
-        <div class="length-info">
-          <h3>${l.name}</h3>
-          <p>${l.desc}</p>
-        </div>
-        ${badge}
-      </div>
-    `;
+    return `<div class="length-card${sel}" onclick="pickLength('${l.id}')"><div class="length-icon-wrap"><canvas data-len="${l.id}" width="96" height="128"></canvas></div><div class="length-info"><h3>${l.name}</h3><p>${l.desc}</p></div>${badge}</div>`;
   }).join('');
   LENGTHS.forEach(l => drawLengthIcon(l.id));
 }
-
-function pickLength(id) {
-  S.length = id;
-  renderLengthCards();
-}
+window.pickLength = function(id) { S.length = id; renderLengthCards(); };
 
 function drawLengthIcon(id) {
-  const c = document.querySelector(`canvas[data-len="${id}"]`);
-  if (!c) return;
-  const dpr = devicePixelRatio || 1;
-  const w = 96, h = 128;
+  const c = document.querySelector(`canvas[data-len="${id}"]`); if (!c) return;
+  const dpr = devicePixelRatio || 1; const w = 96, h = 128;
   c.width = w * dpr; c.height = h * dpr;
-  // Let CSS width:100%;height:100% size the canvas within its 48x64 container
-  const ctx = c.getContext('2d');
-  ctx.scale(dpr, dpr);
-
-  // Window frame
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
   ctx.strokeStyle = '#9A958C'; ctx.lineWidth = 1.5;
   ctx.strokeRect(16, 10, 64, 50);
   ctx.beginPath(); ctx.moveTo(48, 10); ctx.lineTo(48, 60); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(16, 35); ctx.lineTo(80, 35); ctx.stroke();
-
-  // Sill
-  ctx.fillStyle = '#D4C9B8';
-  ctx.fillRect(12, 58, 72, 4);
-
-  // Floor
-  ctx.fillStyle = '#E0D6C8';
-  ctx.fillRect(0, 118, 96, 10);
-
-  // Curtain
+  ctx.fillStyle = '#D4C9B8'; ctx.fillRect(12, 58, 72, 4);
+  ctx.fillStyle = '#E0D6C8'; ctx.fillRect(0, 118, 96, 10);
   ctx.fillStyle = S.length === id ? 'rgba(194,112,90,0.35)' : 'rgba(154,149,140,0.2)';
   const curtainBottom = id === 'sill' ? 58 : id === 'floor' ? 118 : 124;
-  ctx.fillRect(10, 8, 20, curtainBottom - 8);
-  ctx.fillRect(66, 8, 20, curtainBottom - 8);
-
-  // Measurement arrow
-  ctx.strokeStyle = S.length === id ? '#C2705A' : '#9A958C';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 2]);
-  const arrowX = 90;
-  ctx.beginPath(); ctx.moveTo(arrowX, 8); ctx.lineTo(arrowX, curtainBottom); ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.fillRect(10, 8, 20, curtainBottom - 8); ctx.fillRect(66, 8, 20, curtainBottom - 8);
+  ctx.strokeStyle = S.length === id ? '#C2705A' : '#9A958C'; ctx.lineWidth = 1;
+  ctx.setLineDash([3, 2]); ctx.beginPath(); ctx.moveTo(90, 8); ctx.lineTo(90, curtainBottom); ctx.stroke(); ctx.setLineDash([]);
 }
 
 // ===== STYLE CARDS =====
@@ -958,84 +1070,29 @@ function renderStyleCards() {
   const container = document.getElementById('styleCards');
   container.innerHTML = STYLES.map(s => {
     const sel = S.style === s.id ? ' selected' : '';
-    return `
-      <div class="style-card${sel}" onclick="pickStyle('${s.id}')">
-        <div class="style-thumb"><canvas data-style="${s.id}" width="144" height="144"></canvas></div>
-        <div class="style-info">
-          <h3>${s.name}</h3>
-          <p>${s.desc}</p>
-        </div>
-      </div>
-    `;
+    return `<div class="style-card${sel}" onclick="pickStyle('${s.id}')"><div class="style-thumb"><canvas data-style="${s.id}" width="144" height="144"></canvas></div><div class="style-info"><h3>${s.name}</h3><p>${s.desc}</p></div></div>`;
   }).join('');
   STYLES.forEach(s => drawStyleThumb(s.id));
 }
-
-function pickStyle(id) {
-  S.style = id;
-  renderStyleCards();
-}
+window.pickStyle = function(id) { S.style = id; renderStyleCards(); };
 
 function drawStyleThumb(id) {
-  const c = document.querySelector(`canvas[data-style="${id}"]`);
-  if (!c) return;
-  const dpr = devicePixelRatio || 1;
-  const sz = 144;
-  c.width = sz * dpr; c.height = sz * dpr;
-  c.style.width = '72px'; c.style.height = '72px';
-  const ctx = c.getContext('2d');
-  ctx.scale(dpr, dpr);
-
-  // Background
-  ctx.fillStyle = '#F3EDE4';
-  ctx.fillRect(0, 0, sz, sz);
-
-  // Rod
-  ctx.fillStyle = '#B08D57';
-  ctx.fillRect(8, 16, sz - 16, 4);
+  const c = document.querySelector(`canvas[data-style="${id}"]`); if (!c) return;
+  const dpr = devicePixelRatio || 1; const sz = 144;
+  c.width = sz * dpr; c.height = sz * dpr; c.style.width = '72px'; c.style.height = '72px';
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#F3EDE4'; ctx.fillRect(0, 0, sz, sz);
+  ctx.fillStyle = '#B08D57'; ctx.fillRect(8, 16, sz - 16, 4);
   ctx.beginPath(); ctx.arc(12, 18, 5, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc(sz - 12, 18, 5, 0, Math.PI * 2); ctx.fill();
-
   const color = S.style === id ? 'rgba(194,112,90,0.6)' : 'rgba(154,149,140,0.35)';
   ctx.fillStyle = color;
-
   if (id === 'rod-pocket') {
-    // Soft gathered folds
-    for (let i = 0; i < 8; i++) {
-      const x = 14 + i * 15;
-      ctx.beginPath();
-      ctx.moveTo(x, 20);
-      ctx.quadraticCurveTo(x + 4, 70, x + 2, sz - 8);
-      ctx.lineTo(x + 12, sz - 8);
-      ctx.quadraticCurveTo(x + 10, 70, x + 14, 20);
-      ctx.fill();
-    }
+    for (let i = 0; i < 8; i++) { const x = 14 + i * 15; ctx.beginPath(); ctx.moveTo(x, 20); ctx.quadraticCurveTo(x + 4, 70, x + 2, sz - 8); ctx.lineTo(x + 12, sz - 8); ctx.quadraticCurveTo(x + 10, 70, x + 14, 20); ctx.fill(); }
   } else if (id === 'grommet') {
-    // Even folds with rings
-    for (let i = 0; i < 6; i++) {
-      const x = 16 + i * 20;
-      ctx.fillRect(x, 24, 16, sz - 32);
-      // Ring
-      ctx.strokeStyle = '#B08D57'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(x + 8, 18, 5, 0, Math.PI * 2); ctx.stroke();
-    }
+    for (let i = 0; i < 6; i++) { const x = 16 + i * 20; ctx.fillRect(x, 24, 16, sz - 32); ctx.strokeStyle = '#B08D57'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x + 8, 18, 5, 0, Math.PI * 2); ctx.stroke(); }
   } else if (id === 'pinch-pleat') {
-    // Structured pleats
-    for (let i = 0; i < 5; i++) {
-      const x = 12 + i * 26;
-      // Pleat pinch at top
-      ctx.beginPath();
-      ctx.moveTo(x + 4, 20);
-      ctx.lineTo(x + 8, 28);
-      ctx.lineTo(x + 12, 20);
-      ctx.lineTo(x + 18, 20);
-      ctx.lineTo(x + 14, 28);
-      ctx.lineTo(x + 16, sz - 8);
-      ctx.lineTo(x + 2, sz - 8);
-      ctx.lineTo(x + 4, 28);
-      ctx.closePath();
-      ctx.fill();
-    }
+    for (let i = 0; i < 5; i++) { const x = 12 + i * 26; ctx.beginPath(); ctx.moveTo(x + 4, 20); ctx.lineTo(x + 8, 28); ctx.lineTo(x + 12, 20); ctx.lineTo(x + 18, 20); ctx.lineTo(x + 14, 28); ctx.lineTo(x + 16, sz - 8); ctx.lineTo(x + 2, sz - 8); ctx.lineTo(x + 4, 28); ctx.closePath(); ctx.fill(); }
   }
 }
 
@@ -1045,180 +1102,105 @@ function renderFullnessCards() {
   container.innerHTML = FULLNESS_OPTS.map(f => {
     const sel = S.fullness === f.id ? ' selected' : '';
     const tag = f.tag ? `<span class="fullness-tag ${f.tc}">${f.tag}</span>` : '';
-    return `
-      <div class="fullness-card${sel}" onclick="pickFullness(${f.id})">
-        <div class="fullness-info">
-          <h3>${f.name}</h3>
-          <p>${f.desc}</p>
-        </div>
-        ${tag}
-      </div>
-    `;
+    return `<div class="fullness-card${sel}" onclick="pickFullness(${f.id})"><div class="fullness-info"><h3>${f.name}</h3><p>${f.desc}</p></div>${tag}</div>`;
   }).join('');
 }
-
-function pickFullness(v) {
-  S.fullness = v;
-  renderFullnessCards();
-}
+window.pickFullness = function(v) { S.fullness = v; renderFullnessCards(); };
 
 // ===== PATTERNS =====
 function renderPatternGrid() {
   const container = document.getElementById('patternGrid');
   container.innerHTML = PATTERNS.map(p => {
     const sel = S.pattern === p.id ? ' selected' : '';
-    return `
-      <div class="pattern-opt${sel}" onclick="pickPattern('${p.id}')">
-        <div class="pattern-swatch"><canvas data-pat="${p.id}" width="160" height="80"></canvas></div>
-        <div class="pattern-name">${p.name}</div>
-      </div>
-    `;
+    return `<div class="pattern-opt${sel}" onclick="pickPattern('${p.id}')"><div class="pattern-swatch"><canvas data-pat="${p.id}" width="160" height="80"></canvas></div><div class="pattern-name">${p.name}</div></div>`;
   }).join('');
   PATTERNS.forEach(p => drawPatternSwatch(p.id));
 }
-
-function pickPattern(id) {
-  S.pattern = id;
-  renderPatternGrid();
-}
+window.pickPattern = function(id) { S.pattern = id; renderPatternGrid(); };
 
 function drawPatternSwatch(id) {
-  const c = document.querySelector(`canvas[data-pat="${id}"]`);
-  if (!c) return;
-  const dpr = devicePixelRatio || 1;
-  const w = 160, h = 80;
+  const c = document.querySelector(`canvas[data-pat="${id}"]`); if (!c) return;
+  const dpr = devicePixelRatio || 1; const w = 160, h = 80;
   c.width = w * dpr; c.height = h * dpr;
   const pw = c.parentElement.offsetWidth || 80;
-  c.style.width = pw + 'px';
-  c.style.height = (pw * 0.5) + 'px';
-  const ctx = c.getContext('2d');
-  ctx.scale(dpr, dpr);
-  const col = S.color;
-  ctx.fillStyle = col;
-  ctx.globalAlpha = 0.2;
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalAlpha = 1;
-
-  if (id === 'solid') {
-    ctx.fillStyle = col; ctx.globalAlpha = 0.5; ctx.fillRect(0, 0, w, h);
-  } else if (id === 'stripe') {
-    ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.globalAlpha = 0.5;
-    for (let x = 8; x < w; x += 16) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-  } else if (id === 'linen') {
-    ctx.strokeStyle = col; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.3;
-    for (let y = 2; y < h; y += 4) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (Math.random() - 0.5) * 2); ctx.stroke();
-    }
-    for (let x = 2; x < w; x += 5) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + (Math.random() - 0.5) * 2, h); ctx.stroke();
-    }
-  } else if (id === 'sheer') {
-    ctx.fillStyle = col; ctx.globalAlpha = 0.08; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.3;
-    for (let y = 6; y < h; y += 8) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-  } else if (id === 'floral') {
-    ctx.fillStyle = col; ctx.globalAlpha = 0.15; ctx.fillRect(0, 0, w, h);
-    ctx.globalAlpha = 0.5;
-    const pts = [[20,20],[50,50],[80,20],[110,45],[140,25],[30,60],[70,65],[120,60]];
-    pts.forEach(([px, py]) => {
-      ctx.fillStyle = col;
-      for (let a = 0; a < 5; a++) {
-        ctx.beginPath();
-        ctx.ellipse(px + Math.cos(a * 1.256) * 5, py + Math.sin(a * 1.256) * 5, 4, 2, a * 1.256, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.fillStyle = '#B08D57'; ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill();
-    });
-  } else if (id === 'geometric') {
-    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.4;
-    for (let row = 0; row < 4; row++) {
-      for (let c2 = 0; c2 < 8; c2++) {
-        const cx = c2 * 22 + 10, cy = row * 22 + 10;
-        ctx.strokeRect(cx - 7, cy - 7, 14, 14);
-      }
-    }
-  }
+  c.style.width = pw + 'px'; c.style.height = (pw * 0.5) + 'px';
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
+  const col = S.color; ctx.fillStyle = col; ctx.globalAlpha = 0.2; ctx.fillRect(0, 0, w, h); ctx.globalAlpha = 1;
+  if (id === 'solid') { ctx.fillStyle = col; ctx.globalAlpha = 0.5; ctx.fillRect(0, 0, w, h); }
+  else if (id === 'stripe') { ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.globalAlpha = 0.5; for (let x = 8; x < w; x += 16) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); } }
+  else if (id === 'linen') { ctx.strokeStyle = col; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.3; for (let y = 2; y < h; y += 4) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y + (Math.random() - 0.5) * 2); ctx.stroke(); } for (let x = 2; x < w; x += 5) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + (Math.random() - 0.5) * 2, h); ctx.stroke(); } }
+  else if (id === 'sheer') { ctx.fillStyle = col; ctx.globalAlpha = 0.08; ctx.fillRect(0, 0, w, h); ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.3; for (let y = 6; y < h; y += 8) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); } }
+  else if (id === 'floral') { ctx.fillStyle = col; ctx.globalAlpha = 0.15; ctx.fillRect(0, 0, w, h); ctx.globalAlpha = 0.5; [[20,20],[50,50],[80,20],[110,45],[140,25],[30,60],[70,65],[120,60]].forEach(([px, py]) => { ctx.fillStyle = col; for (let a = 0; a < 5; a++) { ctx.beginPath(); ctx.ellipse(px + Math.cos(a * 1.256) * 5, py + Math.sin(a * 1.256) * 5, 4, 2, a * 1.256, 0, Math.PI * 2); ctx.fill(); } ctx.fillStyle = '#B08D57'; ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill(); }); }
+  else if (id === 'geometric') { ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.4; for (let row = 0; row < 4; row++) { for (let c2 = 0; c2 < 8; c2++) { const cx = c2 * 22 + 10, cy = row * 22 + 10; ctx.strokeRect(cx - 7, cy - 7, 14, 14); } } }
   ctx.globalAlpha = 1;
 }
 
 // ===== CUSTOMIZE TOGGLE =====
-function toggleCustomize() {
-  const t = document.getElementById('customizeToggle');
-  const c = document.getElementById('customizeContent');
-  t.classList.toggle('open');
-  c.classList.toggle('open');
-  if (c.classList.contains('open')) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      renderFullnessCards();
-      renderPatternGrid();
-    }));
-  }
-}
+window.toggleCustomize = function() {
+  const t = document.getElementById('customizeToggle'); const c = document.getElementById('customizeContent');
+  t.classList.toggle('open'); c.classList.toggle('open');
+  if (c.classList.contains('open')) { requestAnimationFrame(() => requestAnimationFrame(() => { renderFullnessCards(); renderPatternGrid(); })); }
+};
 
 // ===== RESULTS =====
 function renderResults() {
   const dims = calcDims();
-
-  // Yardage
   document.getElementById('yardageAmount').textContent = dims.yards.toFixed(1);
+  drawPreview(); renderDetectionUI();
 
-  // Preview + detection UI
-  drawPreview();
-  renderDetectionUI();
-
-  // Details
   const styleObj = STYLES.find(s => s.id === S.style);
   const lengthObj = LENGTHS.find(l => l.id === S.length);
   const fullnessObj = FULLNESS_OPTS.find(f => f.id === S.fullness);
   const patObj = PATTERNS.find(p => p.id === S.pattern);
 
-  document.getElementById('detailBody').innerHTML = [
-    row('Window Width', S.width + '"'),
+  const detailRows = [row('Window Width', S.width + '"')];
+  if (S.height > 0) detailRows.push(row('Window Height', S.height + '"'));
+  detailRows.push(
     row('Curtain Length', lengthObj.name + ' (' + dims.finLen + '")'),
-    row('Style', styleObj.name),
-    row('Fullness', fullnessObj.name),
-    row('Pattern', patObj.name),
-    row('Panels', dims.panels),
-  ].join('');
+    row('Style', styleObj.name), row('Fullness', fullnessObj.name),
+    row('Pattern', patObj.name), row('Panels', dims.panels),
+  );
+  if (S.measurementMethod !== 'manual') {
+    detailRows.push(row('Measurement', S.measurementMethod === 'ai' ? 'AI estimated' : 'LiDAR measured'));
+  }
+  document.getElementById('detailBody').innerHTML = detailRows.join('');
 
-  // Cut sheet
   document.getElementById('cutSheetBody').innerHTML = [
     row('Cut Width (per panel)', dims.cutW.toFixed(1) + '"'),
     row('Cut Length (per panel)', dims.cutLen.toFixed(1) + '"'),
     row('Number of Panels', dims.panels),
     row('Fabric Widths per Panel', dims.widths),
     row('Bolt Width', dims.bolt + '"'),
-    `<div class="detail-row" style="background:var(--terracotta-soft);margin:0 -20px;padding:14px 20px;border:none;">
-      <span class="detail-label" style="font-weight:600;color:var(--text);">Total Yardage</span>
-      <span class="detail-value" style="color:var(--terracotta);font-size:1.1rem;">${dims.yards.toFixed(1)} yards</span>
-    </div>`,
+    `<div class="detail-row" style="background:var(--terracotta-soft);margin:0 -20px;padding:14px 20px;border:none;"><span class="detail-label" style="font-weight:600;color:var(--text);">Total Yardage</span><span class="detail-value" style="color:var(--terracotta);font-size:1.1rem;">${dims.yards.toFixed(1)} yards</span></div>`,
   ].join('');
 
-  // Actions
   const actions = document.getElementById('resultActions');
   let html = '';
-
   if (S.shopify && S.shopify.returnUrl) {
-    const returnUrl = S.shopify.returnUrl +
-      (S.shopify.returnUrl.includes('?') ? '&' : '?') +
-      'yards=' + dims.yards.toFixed(1) + '&width=' + S.width + '&style=' + S.style;
-    html += `<a href="${returnUrl}" class="btn btn-shopify btn-block">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
-      Add ${dims.yards.toFixed(1)} Yards to Cart
-    </a>`;
+    const cartUrl = buildCartUrl(S.shopify, { width: S.width, height: S.height, method: S.measurementMethod, confidence: S.confidence, style: S.style, length: S.length, fullness: S.fullness, yards: dims.yards });
+    if (cartUrl) {
+      html += `<a href="${cartUrl}" class="btn btn-shopify btn-block" id="addToCartBtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg> Add ${dims.yards.toFixed(1)} Yards to Cart</a>`;
+    }
   }
-
-  html += `<button class="btn btn-primary btn-block" onclick="shareResults()">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
-    Share My Results
-  </button>`;
-  html += `<button class="btn btn-outline btn-block" onclick="emailResults()">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4l-10 8L2 4"/></svg>
-    Email to Myself
-  </button>`;
+  html += `<button class="btn btn-primary btn-block" onclick="shareResults()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg> Share My Results</button>`;
+  html += `<button class="btn btn-outline btn-block" onclick="emailResults()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4l-10 8L2 4"/></svg> Email to Myself</button>`;
   html += `<button class="btn btn-secondary btn-block" onclick="startOver()">Start Over</button>`;
-
   actions.innerHTML = html;
+
+  const cartBtn = document.getElementById('addToCartBtn');
+  if (cartBtn) cartBtn.addEventListener('click', () => handleAddToCart());
+}
+
+function handleAddToCart() {
+  if (S.aiEstimate) {
+    submitFeedback({
+      estimatedWidth: S.aiEstimate.widthInches, estimatedHeight: S.aiEstimate.heightInches,
+      actualWidth: S.width, actualHeight: S.height, confidence: S.confidence,
+      method: S.measurementMethod, accepted: true,
+      adjusted: S.width !== Math.round(S.aiEstimate.widthInches * 2) / 2 || S.height !== Math.round(S.aiEstimate.heightInches * 2) / 2,
+      consentToStore: S.consentToStore, windowBounds: S.windowBounds, exif: S.exif,
+    });
+  }
 }
 
 function row(label, value) {
@@ -1227,714 +1209,243 @@ function row(label, value) {
 
 // ===== CALC =====
 function calcDims() {
-  const styleObj = STYLES.find(s => s.id === S.style);
-  const hdr = styleObj.hdr;
-
-  const lenObj = LENGTHS.find(l => l.id === S.length) || LENGTHS[1];
-  const finLen = lenObj.finLen();
-
+  const styleObj = STYLES.find(s => s.id === S.style); const hdr = styleObj.hdr;
+  const lenObj = LENGTHS.find(l => l.id === S.length) || LENGTHS[1]; const finLen = lenObj.finLen();
   const cutLen = finLen + hdr + ALLOW.bottomHem;
-  const coverW = S.width + (ALLOW.overlap * 2);
-  const totalFW = coverW * S.fullness;
-  const panels = 2;
-  const perPanel = totalFW / panels;
-  const cutW = perPanel + (ALLOW.sideHem * 2);
-  const bolt = 54;
+  const coverW = S.width + (ALLOW.overlap * 2); const totalFW = coverW * S.fullness;
+  const panels = 2; const perPanel = totalFW / panels;
+  const cutW = perPanel + (ALLOW.sideHem * 2); const bolt = 54;
   const widths = Math.ceil(cutW / bolt);
   const yards = Math.ceil((cutLen * panels * widths / 36) * 10) / 10;
-
   return { finLen, cutLen, cutW, panels, widths, yards, hdr, bolt };
 }
 
 // ===== PREVIEW =====
 function drawPreview() {
-  const c = document.getElementById('previewCanvas');
-  if (!c) return;
-  const dpr = devicePixelRatio || 1;
-  const cw = c.parentElement.offsetWidth || 360;
-  const ch = cw * 0.75;
-  c.width = cw * dpr; c.height = ch * dpr;
-  c.style.width = cw + 'px'; c.style.height = ch + 'px';
-  const ctx = c.getContext('2d');
-  ctx.scale(dpr, dpr);
-
-  // If photo, draw it as background
+  const c = document.getElementById('previewCanvas'); if (!c) return;
+  const dpr = devicePixelRatio || 1; const cw = c.parentElement.offsetWidth || 360; const ch = cw * 0.75;
+  c.width = cw * dpr; c.height = ch * dpr; c.style.width = cw + 'px'; c.style.height = ch + 'px';
+  const ctx = c.getContext('2d'); ctx.scale(dpr, dpr);
   if (S.photo) {
-    const img = new Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, cw, ch);
-      drawCurtainOverlay(ctx, cw, ch);
-    };
-    img.src = S.photo;
+    const img = new Image(); img.onload = () => { ctx.drawImage(img, 0, 0, cw, ch); drawCurtainOverlay(ctx, cw, ch); }; img.src = S.photo;
   } else {
-    // Generic room
     ctx.fillStyle = '#F3EDE4'; ctx.fillRect(0, 0, cw, ch);
-    // Wall texture
-    ctx.fillStyle = 'rgba(210,200,185,0.3)';
-    for (let i = 0; i < 60; i++) {
-      ctx.fillRect(Math.random() * cw, Math.random() * ch, 1, 1);
-    }
-    // Window — positioned lower so rod and curtains look realistic
+    ctx.fillStyle = 'rgba(210,200,185,0.3)'; for (let i = 0; i < 60; i++) { ctx.fillRect(Math.random() * cw, Math.random() * ch, 1, 1); }
     const wx = cw * 0.2, wy = ch * 0.18, ww = cw * 0.6, wh = ch * 0.45;
     ctx.fillStyle = '#B8D4E3'; ctx.fillRect(wx, wy, ww, wh);
-    // Panes
-    ctx.strokeStyle = '#D4C9B8'; ctx.lineWidth = 3;
-    ctx.strokeRect(wx, wy, ww, wh);
+    ctx.strokeStyle = '#D4C9B8'; ctx.lineWidth = 3; ctx.strokeRect(wx, wy, ww, wh);
     ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(wx, wy + wh / 2); ctx.lineTo(wx + ww, wy + wh / 2); ctx.stroke();
-    // Sill
     ctx.fillStyle = '#D4C9B8'; ctx.fillRect(wx - 8, wy + wh, ww + 16, 6);
-    // Floor
     ctx.fillStyle = '#D4C0A8'; ctx.fillRect(0, ch * 0.88, cw, ch * 0.12);
     ctx.strokeStyle = 'rgba(180,160,140,0.3)'; ctx.lineWidth = 0.5;
-    for (let x = 0; x < cw; x += 40) {
-      ctx.beginPath(); ctx.moveTo(x, ch * 0.88); ctx.lineTo(x, ch); ctx.stroke();
-    }
-
+    for (let x = 0; x < cw; x += 40) { ctx.beginPath(); ctx.moveTo(x, ch * 0.88); ctx.lineTo(x, ch); ctx.stroke(); }
     drawCurtainOverlay(ctx, cw, ch);
   }
 }
 
 function drawCurtainOverlay(ctx, cw, ch) {
   const color = S.color;
-
-  // Use detected window bounds if available, else hardcoded defaults
   let wx, wy, ww, wh;
-  if (S.windowBounds && S.photo) {
-    wx = S.windowBounds.x * cw;
-    wy = S.windowBounds.y * ch;
-    ww = S.windowBounds.w * cw;
-    wh = S.windowBounds.h * ch;
-  } else {
-    wx = cw * 0.2;
-    wy = ch * 0.18;
-    ww = cw * 0.6;
-    wh = ch * 0.45;
-  }
+  if (S.windowBounds && S.photo) { wx = S.windowBounds.x * cw; wy = S.windowBounds.y * ch; ww = S.windowBounds.w * cw; wh = S.windowBounds.h * ch; }
+  else { wx = cw * 0.2; wy = ch * 0.18; ww = cw * 0.6; wh = ch * 0.45; }
   const rodY = wy - 12;
-
-  // Rod — positioned just above the detected/default window
-  ctx.fillStyle = '#B08D57';
-  const rodExtend = Math.min(20, ww * 0.12);
+  ctx.fillStyle = '#B08D57'; const rodExtend = Math.min(20, ww * 0.12);
   ctx.fillRect(wx - rodExtend, rodY, ww + rodExtend * 2, 4);
   ctx.beginPath(); ctx.arc(wx - rodExtend, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.arc(wx + ww + rodExtend, rodY + 2, 6, 0, Math.PI * 2); ctx.fill();
-
-  // Curtain bottom — sill is relative to detected window, floor/puddle are absolute
   let curtainBottom;
   if (S.length === 'sill') curtainBottom = wy + wh + 6;
   else if (S.length === 'floor') curtainBottom = ch * 0.88;
   else curtainBottom = ch * 0.94;
-
-  // Panels with folds
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.7;
-
-  // Left panel — sized relative to window width
+  ctx.fillStyle = color; ctx.globalAlpha = 0.7;
   const panelOverlap = Math.min(16, ww * 0.08);
   const leftStart = wx - panelOverlap, leftEnd = wx + ww * 0.3;
   drawPanel(ctx, leftStart, rodY + 4, leftEnd, curtainBottom);
-
-  // Right panel
   const rightStart = wx + ww * 0.7, rightEnd = wx + ww + panelOverlap;
   drawPanel(ctx, rightStart, rodY + 4, rightEnd, curtainBottom);
-
   ctx.globalAlpha = 1;
-
-  // Pattern overlay
   if (S.pattern === 'stripe') {
     ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 2;
-    for (let x = leftStart; x < leftEnd; x += 10) {
-      ctx.beginPath(); ctx.moveTo(x, rodY + 4); ctx.lineTo(x, curtainBottom); ctx.stroke();
-    }
-    for (let x = rightStart; x < rightEnd; x += 10) {
-      ctx.beginPath(); ctx.moveTo(x, rodY + 4); ctx.lineTo(x, curtainBottom); ctx.stroke();
-    }
+    for (let x = leftStart; x < leftEnd; x += 10) { ctx.beginPath(); ctx.moveTo(x, rodY + 4); ctx.lineTo(x, curtainBottom); ctx.stroke(); }
+    for (let x = rightStart; x < rightEnd; x += 10) { ctx.beginPath(); ctx.moveTo(x, rodY + 4); ctx.lineTo(x, curtainBottom); ctx.stroke(); }
   } else if (S.pattern === 'sheer') {
-    ctx.globalAlpha = 0.15;
-    ctx.fillStyle = color;
-    ctx.fillRect(leftEnd, rodY + 4, rightStart - leftEnd, curtainBottom - rodY - 4);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = 0.15; ctx.fillStyle = color;
+    ctx.fillRect(leftEnd, rodY + 4, rightStart - leftEnd, curtainBottom - rodY - 4); ctx.globalAlpha = 1;
   }
 }
 
 function drawPanel(ctx, x1, y1, x2, y2) {
   const folds = Math.floor((x2 - x1) / 12);
-  for (let i = 0; i < folds; i++) {
-    const fx = x1 + i * ((x2 - x1) / folds);
-    const fw = (x2 - x1) / folds;
-    const shade = i % 2 === 0 ? 0 : -0.08;
-    ctx.globalAlpha = 0.7 + shade;
-    ctx.fillRect(fx, y1, fw, y2 - y1);
-  }
+  for (let i = 0; i < folds; i++) { const fx = x1 + i * ((x2 - x1) / folds); const fw = (x2 - x1) / folds; const shade = i % 2 === 0 ? 0 : -0.08; ctx.globalAlpha = 0.7 + shade; ctx.fillRect(fx, y1, fw, y2 - y1); }
   ctx.globalAlpha = 0.7;
 }
 
-// ===== WINDOW DETECTION (CV Pipeline) =====
-
-function detectWindowBounds(photoDataUrl) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      // 1. Downscale to ~200px wide for speed
-      const maxDim = 200;
-      const scale = maxDim / Math.max(img.width, img.height);
-      const sw = Math.round(img.width * scale);
-      const sh = Math.round(img.height * scale);
-      const off = document.createElement('canvas');
-      off.width = sw; off.height = sh;
-      const octx = off.getContext('2d');
-      octx.drawImage(img, 0, 0, sw, sh);
-      const pixels = octx.getImageData(0, 0, sw, sh).data;
-
-      // 2. Extract channels: luminance + blue ratio (sky detection)
-      const lum = new Float32Array(sw * sh);
-      const blueRatio = new Float32Array(sw * sh);
-      for (let i = 0; i < sw * sh; i++) {
-        const r = pixels[i * 4], g = pixels[i * 4 + 1], b = pixels[i * 4 + 2];
-        lum[i] = 0.299 * r + 0.587 * g + 0.114 * b;
-        const total = r + g + b;
-        // Blue ratio: how "blue" is this pixel relative to its brightness
-        // Sky typically has b/(r+g+b) > 0.36, interior walls < 0.33
-        blueRatio[i] = total > 30 ? (b / total) * 255 : 0;
-      }
-
-      // 3. Build integral images: brightness, blue channel, directional edges
-      const intImg = buildIntegralImage(lum, sw, sh);
-      const intBlue = buildIntegralImage(blueRatio, sw, sh);
-      const { horiz: edgesH, vert: edgesV, combined: edgesC } = computeDirectionalEdges(lum, sw, sh);
-      const intEdge = buildIntegralImage(edgesC, sw, sh);
-      const intEdgeH = buildIntegralImage(edgesH, sw, sh);
-      const intEdgeV = buildIntegralImage(edgesV, sw, sh);
-
-      // 4. Total image stats for contrast scoring
-      const totalPixels = sw * sh;
-      const totalBrightness = queryRect(intImg, 0, 0, sw - 1, sh - 1, sw);
-      const totalBlue = queryRect(intBlue, 0, 0, sw - 1, sh - 1, sw);
-
-      // 5. PASS 1: Coarse scan (5% grid) — find top 5 candidates
-      const coarseStepX = Math.max(2, Math.round(sw * 0.05));
-      const coarseStepY = Math.max(2, Math.round(sh * 0.05));
-      const topN = [];
-
-      function scoreCandidate(x, y, rw, rh) {
-        const x2 = x + rw - 1, y2 = y + rh - 1;
-        if (x2 >= sw || y2 >= sh) return -1;
-
-        const area = rw * rh;
-        const insideBright = queryRect(intImg, x, y, x2, y2, sw);
-        const outsideBright = totalBrightness - insideBright;
-        const outsideArea = totalPixels - area;
-        const avgIn = insideBright / area;
-        const avgOut = outsideArea > 0 ? outsideBright / outsideArea : 128;
-        const contrast = avgOut > 0 ? avgIn / avgOut : 0;
-        const brightnessScore = Math.min(contrast / 2.0, 1.0);
-
-        // Blue channel: windows showing sky have higher blue ratio inside vs outside
-        const insideBlue = queryRect(intBlue, x, y, x2, y2, sw);
-        const outsideBlue = totalBlue - insideBlue;
-        const avgBlueIn = insideBlue / area;
-        const avgBlueOut = outsideArea > 0 ? outsideBlue / outsideArea : 85;
-        const blueContrast = avgBlueOut > 0 ? avgBlueIn / avgBlueOut : 1;
-        // Score: >1.1 means inside is bluer than outside (likely sky)
-        const blueScore = Math.min(Math.max(blueContrast - 0.9, 0) / 0.5, 1.0);
-
-        // Directional edge scoring: window frames have strong horizontal edges
-        // at top/bottom and strong vertical edges at sides
-        const edgeBand = Math.max(2, Math.round(Math.min(rw, rh) * 0.08));
-        let dirEdgeScore = 0;
-
-        // Top/bottom should have strong HORIZONTAL edges (frame/sill)
-        if (y + edgeBand - 1 < sh) {
-          const topHoriz = queryRect(intEdgeH, x, y, x2, Math.min(y + edgeBand - 1, y2), sw);
-          dirEdgeScore += topHoriz / (rw * edgeBand);
-        }
-        if (y2 - edgeBand + 1 >= y) {
-          const botHoriz = queryRect(intEdgeH, x, Math.max(y2 - edgeBand + 1, y), x2, y2, sw);
-          dirEdgeScore += botHoriz / (rw * edgeBand);
-        }
-        // Left/right should have strong VERTICAL edges (frame sides)
-        if (x + edgeBand - 1 <= x2) {
-          const leftVert = queryRect(intEdgeV, x, y, Math.min(x + edgeBand - 1, x2), y2, sw);
-          dirEdgeScore += leftVert / (edgeBand * rh);
-        }
-        if (x2 - edgeBand + 1 >= x) {
-          const rightVert = queryRect(intEdgeV, Math.max(x2 - edgeBand + 1, x), y, x2, y2, sw);
-          dirEdgeScore += rightVert / (edgeBand * rh);
-        }
-        const edgeScore = Math.min(dirEdgeScore / 200, 1.0);
-
-        // Brightness uniformity: windows tend to have more uniform brightness inside
-        // Use variance approximation via integral image
-        const meanIn = avgIn;
-        let varianceApprox = 0;
-        const sampleStep = Math.max(1, Math.floor(Math.min(rw, rh) / 5));
-        let sampleCount = 0;
-        for (let sy = y; sy <= y2; sy += sampleStep) {
-          for (let sx = x; sx <= x2; sx += sampleStep) {
-            const v = lum[sy * sw + sx] - meanIn;
-            varianceApprox += v * v;
-            sampleCount++;
-          }
-        }
-        varianceApprox = sampleCount > 0 ? Math.sqrt(varianceApprox / sampleCount) : 50;
-        // Low variance = more uniform = more likely a window or sky
-        const uniformScore = Math.max(0, 1.0 - varianceApprox / 80);
-
-        // Aspect ratio plausibility (windows are typically 0.5–3.0)
-        const ar = rw / rh;
-        let aspectScore;
-        if (ar >= 0.6 && ar <= 2.5) aspectScore = 1.0;
-        else if (ar >= 0.4 && ar <= 3.5) aspectScore = 0.5;
-        else aspectScore = 0.1;
-
-        // Position: prefer centered, upper-middle of image
-        const cx = (x + rw / 2) / sw;
-        const cy = (y + rh / 2) / sh;
-        const posScore = Math.exp(-2 * ((cx - 0.5) ** 2 + (cy - 0.38) ** 2));
-
-        // Size score: prefer moderately sized (not tiny, not huge)
-        const areaFrac = area / totalPixels;
-        const sizeScore = areaFrac >= 0.05 && areaFrac <= 0.6 ? 1.0 :
-                          areaFrac >= 0.02 ? 0.5 : 0.2;
-
-        // Weighted total — 7 factors
-        return brightnessScore * 0.28
-             + blueScore * 0.12
-             + edgeScore * 0.20
-             + uniformScore * 0.07
-             + aspectScore * 0.10
-             + posScore * 0.10
-             + sizeScore * 0.13;
-      }
-
-      // Coarse scan
-      for (let y = 0; y < sh * 0.65; y += coarseStepY) {
-        for (let x = 0; x < sw * 0.75; x += coarseStepX) {
-          for (let rw = Math.round(sw * 0.15); rw <= Math.min(sw * 0.85, sw - x); rw += coarseStepX) {
-            for (let rh = Math.round(sh * 0.15); rh <= Math.min(sh * 0.7, sh - y); rh += coarseStepY) {
-              const score = scoreCandidate(x, y, rw, rh);
-              if (score < 0) continue;
-              // Keep top 5 candidates
-              if (topN.length < 5 || score > topN[topN.length - 1].score) {
-                topN.push({ x, y, rw, rh, score });
-                topN.sort((a, b) => b.score - a.score);
-                if (topN.length > 5) topN.length = 5;
-              }
-            }
-          }
-        }
-      }
-
-      // 6. PASS 2: Fine refinement around each top candidate
-      // Use wider search range for height (windows are often taller than coarse grid catches)
-      const fineStepX = Math.max(1, Math.round(sw * 0.015));
-      const fineStepY = Math.max(1, Math.round(sh * 0.015));
-      let best = null;
-      let bestScore = -1;
-
-      for (const cand of topN) {
-        const padXY = Math.round(sw * 0.08); // ±8% for position
-        const padSize = Math.round(sw * 0.12); // ±12% for size (wider to catch full height)
-        const yMin = Math.max(0, cand.y - padXY);
-        const yMax = Math.min(Math.round(sh * 0.65), cand.y + padXY);
-        const xMin = Math.max(0, cand.x - padXY);
-        const xMax = Math.min(Math.round(sw * 0.75), cand.x + padXY);
-        const rwMin = Math.max(Math.round(sw * 0.15), cand.rw - padSize);
-        const rwMax = Math.min(sw, cand.rw + padSize);
-        const rhMin = Math.max(Math.round(sh * 0.15), cand.rh - padSize);
-        const rhMax = Math.min(sh, cand.rh + Math.round(sh * 0.25)); // allow much taller
-
-        for (let y = yMin; y <= yMax; y += fineStepY) {
-          for (let x = xMin; x <= xMax; x += fineStepX) {
-            for (let rw = rwMin; rw <= Math.min(rwMax, sw - x); rw += fineStepX) {
-              for (let rh = rhMin; rh <= Math.min(rhMax, sh - y); rh += fineStepY) {
-                const score = scoreCandidate(x, y, rw, rh);
-                if (score > bestScore) {
-                  bestScore = score;
-                  best = { x: x / sw, y: y / sh, w: rw / sw, h: rh / sh, confidence: score };
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // 7. PASS 3: Sill detection — extend bottom edge to nearest strong horizontal edge
-      if (best) {
-        const bx = Math.round(best.x * sw), by = Math.round(best.y * sh);
-        const bw = Math.round(best.w * sw), bh = Math.round(best.h * sh);
-        const bot = by + bh;
-        let bestSillY = bot;
-        let bestSillStrength = 0;
-        // Scan downward from current bottom, looking for a strong horizontal edge (sill)
-        for (let sy = bot; sy < Math.min(bot + Math.round(sh * 0.3), sh - 1); sy++) {
-          const edgeStr = queryRect(intEdgeH, bx, sy, Math.min(bx + bw - 1, sw - 1), Math.min(sy + 2, sh - 1), sw);
-          const avgStr = edgeStr / (bw * 3);
-          if (avgStr > bestSillStrength && avgStr > 15) {
-            bestSillStrength = avgStr;
-            bestSillY = sy;
-          }
-        }
-        // If we found a sill below, extend and re-score
-        if (bestSillY > bot + 2) {
-          const extH = bestSillY - by;
-          const extScore = scoreCandidate(bx, by, bw, extH);
-          if (extScore > bestScore * 0.85) { // accept if at least 85% as good
-            best = { x: bx / sw, y: by / sh, w: bw / sw, h: extH / sh, confidence: Math.max(extScore, bestScore) };
-            bestScore = Math.max(extScore, bestScore);
-          }
-        }
-      }
-
-      resolve(best);
-    };
-    img.onerror = () => resolve(null);
-    img.src = photoDataUrl;
-  });
-}
-
-function buildIntegralImage(data, w, h) {
-  const int = new Float64Array(w * h);
-  for (let y = 0; y < h; y++) {
-    let rowSum = 0;
-    for (let x = 0; x < w; x++) {
-      rowSum += data[y * w + x];
-      int[y * w + x] = rowSum + (y > 0 ? int[(y - 1) * w + x] : 0);
-    }
-  }
-  return int;
-}
-
-function queryRect(int, x1, y1, x2, y2, w) {
-  const d = int[y2 * w + x2];
-  const a = (x1 > 0 && y1 > 0) ? int[(y1 - 1) * w + (x1 - 1)] : 0;
-  const b = (y1 > 0) ? int[(y1 - 1) * w + x2] : 0;
-  const c = (x1 > 0) ? int[y2 * w + (x1 - 1)] : 0;
-  return d - b - c + a;
-}
-
-// Directional Sobel: separate horizontal and vertical edge responses
-// Horizontal edges (gy) detect window frame top/bottom + sill
-// Vertical edges (gx) detect window frame sides
-function computeDirectionalEdges(lum, w, h) {
-  const horiz = new Float32Array(w * h);
-  const vert = new Float32Array(w * h);
-  const combined = new Float32Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const gx = -lum[(y - 1) * w + (x - 1)] + lum[(y - 1) * w + (x + 1)]
-               - 2 * lum[y * w + (x - 1)] + 2 * lum[y * w + (x + 1)]
-               - lum[(y + 1) * w + (x - 1)] + lum[(y + 1) * w + (x + 1)];
-      const gy = -lum[(y - 1) * w + (x - 1)] - 2 * lum[(y - 1) * w + x] - lum[(y - 1) * w + (x + 1)]
-               + lum[(y + 1) * w + (x - 1)] + 2 * lum[(y + 1) * w + x] + lum[(y + 1) * w + (x + 1)];
-      vert[y * w + x] = Math.abs(gx);
-      horiz[y * w + x] = Math.abs(gy);
-      combined[y * w + x] = Math.sqrt(gx * gx + gy * gy);
-    }
-  }
-  return { horiz, vert, combined };
-}
-
+// ===== WINDOW DETECTION =====
 function runWindowDetection(photoUrl) {
-  S.windowBounds = null;
-  S.windowDetectionConfidence = 0;
-  detectWindowBounds(photoUrl).then(bounds => {
+  S.windowBounds = null; S.windowDetectionConfidence = 0;
+  detectWindow(photoUrl).then(bounds => {
     if (bounds && bounds.confidence >= 0.3) {
       S.windowBounds = { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h };
       S.windowDetectionConfidence = bounds.confidence;
-      console.log(`[WindowDetect] Found window at (${(bounds.x * 100).toFixed(0)}%, ${(bounds.y * 100).toFixed(0)}%) ` +
-        `size ${(bounds.w * 100).toFixed(0)}%×${(bounds.h * 100).toFixed(0)}% confidence=${bounds.confidence.toFixed(2)}`);
-    } else {
-      console.log('[WindowDetect] No window detected — using default placement');
-    }
+      console.log(`[WindowDetect] Found window at (${(bounds.x * 100).toFixed(0)}%, ${(bounds.y * 100).toFixed(0)}%) size ${(bounds.w * 100).toFixed(0)}%x${(bounds.h * 100).toFixed(0)}% confidence=${bounds.confidence.toFixed(2)}`);
+    } else { console.log('[WindowDetect] No window detected — using default placement'); }
   });
 }
 
 // ===== MANUAL WINDOW ADJUSTMENT =====
 let adjusting = false;
-let adjustDrag = null; // { startX, startY, origBounds }
+let adjustDrag = null;
 
 function renderDetectionUI() {
   const badge = document.getElementById('detectionBadge');
   const link = document.getElementById('adjustLink');
   if (!badge || !link) return;
-
   if (S.photo && S.windowBounds) {
     const pct = Math.round(S.windowDetectionConfidence * 100);
-    badge.innerHTML = `<span class="detection-badge detected">
-      <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--sage)"/></svg>
-      Window detected (${pct}%)
-    </span>`;
+    badge.innerHTML = `<span class="detection-badge detected"><svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--sage)"/></svg> Window detected (${pct}%)</span>`;
     link.innerHTML = '<span class="adjust-link" onclick="startAdjust()">Tap to adjust window position</span>';
   } else if (S.photo) {
     badge.innerHTML = '<span class="detection-badge default">Using default placement</span>';
     link.innerHTML = '<span class="adjust-link" onclick="startAdjust()">Tap to set window position</span>';
-  } else {
-    badge.innerHTML = '';
-    link.innerHTML = '';
-  }
+  } else { badge.innerHTML = ''; link.innerHTML = ''; }
 }
 
-function startAdjust() {
+window.startAdjust = function() {
   adjusting = true;
-  const overlay = document.getElementById('adjustOverlay');
-  const preview = document.getElementById('previewCanvas');
-  overlay.classList.remove('hidden');
-  overlay.width = preview.width;
-  overlay.height = preview.height;
-  overlay.style.width = preview.style.width;
-  overlay.style.height = preview.style.height;
-
-  // Initialize bounds if none exist
-  if (!S.windowBounds) {
-    S.windowBounds = { x: 0.2, y: 0.18, w: 0.6, h: 0.45 };
-  }
-
+  const overlay = document.getElementById('adjustOverlay'); const preview = document.getElementById('previewCanvas');
+  overlay.classList.remove('hidden'); overlay.width = preview.width; overlay.height = preview.height;
+  overlay.style.width = preview.style.width; overlay.style.height = preview.style.height;
+  if (!S.windowBounds) S.windowBounds = { x: 0.2, y: 0.18, w: 0.6, h: 0.45 };
   drawAdjustRect();
-
-  const link = document.getElementById('adjustLink');
-  link.innerHTML = '<button class="adjust-done-btn" onclick="finishAdjust()">Done Adjusting</button>';
-
-  // Touch handlers
+  document.getElementById('adjustLink').innerHTML = '<button class="adjust-done-btn" onclick="finishAdjust()">Done Adjusting</button>';
   overlay.addEventListener('touchstart', handleAdjustStart, { passive: false });
   overlay.addEventListener('touchmove', handleAdjustMove, { passive: false });
   overlay.addEventListener('touchend', handleAdjustEnd);
-  // Mouse fallback for desktop testing
   overlay.addEventListener('mousedown', handleAdjustMouseDown);
   overlay.addEventListener('mousemove', handleAdjustMouseMove);
   overlay.addEventListener('mouseup', handleAdjustMouseUp);
-}
+};
 
-function finishAdjust() {
+window.finishAdjust = function() {
   adjusting = false;
-  const overlay = document.getElementById('adjustOverlay');
-  overlay.classList.add('hidden');
-  overlay.removeEventListener('touchstart', handleAdjustStart);
-  overlay.removeEventListener('touchmove', handleAdjustMove);
-  overlay.removeEventListener('touchend', handleAdjustEnd);
-  overlay.removeEventListener('mousedown', handleAdjustMouseDown);
-  overlay.removeEventListener('mousemove', handleAdjustMouseMove);
-  overlay.removeEventListener('mouseup', handleAdjustMouseUp);
-
-  S.windowDetectionConfidence = 1.0; // User confirmed
-  drawPreview();
-  renderDetectionUI();
-}
+  const overlay = document.getElementById('adjustOverlay'); overlay.classList.add('hidden');
+  overlay.removeEventListener('touchstart', handleAdjustStart); overlay.removeEventListener('touchmove', handleAdjustMove);
+  overlay.removeEventListener('touchend', handleAdjustEnd); overlay.removeEventListener('mousedown', handleAdjustMouseDown);
+  overlay.removeEventListener('mousemove', handleAdjustMouseMove); overlay.removeEventListener('mouseup', handleAdjustMouseUp);
+  S.windowDetectionConfidence = 1.0; drawPreview(); renderDetectionUI();
+};
 
 function drawAdjustRect() {
-  const overlay = document.getElementById('adjustOverlay');
-  const ctx = overlay.getContext('2d');
-  const dpr = devicePixelRatio || 1;
-  const cw = parseFloat(overlay.style.width);
-  const ch = parseFloat(overlay.style.height);
-  ctx.clearRect(0, 0, overlay.width, overlay.height);
-  ctx.scale(dpr, dpr);
-
+  const overlay = document.getElementById('adjustOverlay'); const ctx = overlay.getContext('2d');
+  const dpr = devicePixelRatio || 1; const cw = parseFloat(overlay.style.width); const ch = parseFloat(overlay.style.height);
+  ctx.clearRect(0, 0, overlay.width, overlay.height); ctx.scale(dpr, dpr);
   if (!S.windowBounds) { ctx.setTransform(1,0,0,1,0,0); return; }
-
-  const b = S.windowBounds;
-  const rx = b.x * cw, ry = b.y * ch, rw = b.w * cw, rh = b.h * ch;
-
-  // Semi-transparent dark outside the rectangle
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.clearRect(rx, ry, rw, rh);
-
-  // Dashed rectangle border
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([6, 4]);
-  ctx.strokeRect(rx, ry, rw, rh);
-  ctx.setLineDash([]);
-
-  // Corner handles (44×44 touch targets, drawn as 12px visible circles)
-  const corners = [
-    [rx, ry], [rx + rw, ry],
-    [rx, ry + rh], [rx + rw, ry + rh]
-  ];
-  corners.forEach(([cx, cy]) => {
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'var(--terracotta, #C2705A)';
-    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+  const b = S.windowBounds; const rx = b.x * cw, ry = b.y * ch, rw = b.w * cw, rh = b.h * ch;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, cw, ch); ctx.clearRect(rx, ry, rw, rh);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.strokeRect(rx, ry, rw, rh); ctx.setLineDash([]);
+  [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]].forEach(([cx, cy]) => {
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#C2705A'; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
   });
-
-  // Label
-  ctx.fillStyle = '#fff';
-  ctx.font = '600 11px Inter, sans-serif';
-  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff'; ctx.font = '600 11px Inter, sans-serif'; ctx.textAlign = 'center';
   ctx.fillText('Drag corners to adjust', rx + rw / 2, ry + rh / 2 + 4);
-
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function getAdjustCoords(e, overlay) {
-  const rect = overlay.getBoundingClientRect();
-  const cw = parseFloat(overlay.style.width);
-  const ch = parseFloat(overlay.style.height);
+  const rect = overlay.getBoundingClientRect(); const cw = parseFloat(overlay.style.width); const ch = parseFloat(overlay.style.height);
   const touch = e.touches ? e.touches[0] : e;
-  return {
-    nx: (touch.clientX - rect.left) / cw,
-    ny: (touch.clientY - rect.top) / ch
-  };
+  return { nx: (touch.clientX - rect.left) / cw, ny: (touch.clientY - rect.top) / ch };
 }
 
 function findNearestCorner(nx, ny) {
-  if (!S.windowBounds) return null;
-  const b = S.windowBounds;
-  const corners = [
-    { id: 'tl', x: b.x, y: b.y },
-    { id: 'tr', x: b.x + b.w, y: b.y },
-    { id: 'bl', x: b.x, y: b.y + b.h },
-    { id: 'br', x: b.x + b.w, y: b.y + b.h },
-  ];
-  let closest = null, minDist = 0.08; // threshold ~8% of image
-  corners.forEach(c => {
-    const d = Math.sqrt((nx - c.x) ** 2 + (ny - c.y) ** 2);
-    if (d < minDist) { minDist = d; closest = c.id; }
-  });
-  // Also check if inside rectangle for move
-  if (!closest && nx > b.x && nx < b.x + b.w && ny > b.y && ny < b.y + b.h) {
-    closest = 'move';
-  }
+  if (!S.windowBounds) return null; const b = S.windowBounds;
+  const corners = [{ id: 'tl', x: b.x, y: b.y }, { id: 'tr', x: b.x + b.w, y: b.y }, { id: 'bl', x: b.x, y: b.y + b.h }, { id: 'br', x: b.x + b.w, y: b.y + b.h }];
+  let closest = null, minDist = 0.08;
+  corners.forEach(c => { const d = Math.sqrt((nx - c.x) ** 2 + (ny - c.y) ** 2); if (d < minDist) { minDist = d; closest = c.id; } });
+  if (!closest && nx > b.x && nx < b.x + b.w && ny > b.y && ny < b.y + b.h) closest = 'move';
   return closest;
 }
 
 function handleAdjustStart(e) {
-  e.preventDefault();
-  const overlay = document.getElementById('adjustOverlay');
-  const { nx, ny } = getAdjustCoords(e, overlay);
-  const corner = findNearestCorner(nx, ny);
-  if (corner) {
-    adjustDrag = { corner, startNx: nx, startNy: ny, origBounds: { ...S.windowBounds } };
-  }
+  e.preventDefault(); const overlay = document.getElementById('adjustOverlay');
+  const { nx, ny } = getAdjustCoords(e, overlay); const corner = findNearestCorner(nx, ny);
+  if (corner) adjustDrag = { corner, startNx: nx, startNy: ny, origBounds: { ...S.windowBounds } };
 }
 
 function handleAdjustMove(e) {
-  if (!adjustDrag) return;
-  e.preventDefault();
-  const overlay = document.getElementById('adjustOverlay');
-  const { nx, ny } = getAdjustCoords(e, overlay);
-  const ob = adjustDrag.origBounds;
-  const dx = nx - adjustDrag.startNx;
-  const dy = ny - adjustDrag.startNy;
-
+  if (!adjustDrag) return; e.preventDefault();
+  const overlay = document.getElementById('adjustOverlay'); const { nx, ny } = getAdjustCoords(e, overlay);
+  const ob = adjustDrag.origBounds; const dx = nx - adjustDrag.startNx; const dy = ny - adjustDrag.startNy;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-  if (adjustDrag.corner === 'move') {
-    S.windowBounds.x = clamp(ob.x + dx, 0, 1 - ob.w);
-    S.windowBounds.y = clamp(ob.y + dy, 0, 1 - ob.h);
-  } else if (adjustDrag.corner === 'tl') {
-    S.windowBounds.x = clamp(ob.x + dx, 0, ob.x + ob.w - 0.1);
-    S.windowBounds.y = clamp(ob.y + dy, 0, ob.y + ob.h - 0.1);
-    S.windowBounds.w = ob.x + ob.w - S.windowBounds.x;
-    S.windowBounds.h = ob.y + ob.h - S.windowBounds.y;
-  } else if (adjustDrag.corner === 'tr') {
-    S.windowBounds.w = clamp(ob.w + dx, 0.1, 1 - ob.x);
-    S.windowBounds.y = clamp(ob.y + dy, 0, ob.y + ob.h - 0.1);
-    S.windowBounds.h = ob.y + ob.h - S.windowBounds.y;
-  } else if (adjustDrag.corner === 'bl') {
-    S.windowBounds.x = clamp(ob.x + dx, 0, ob.x + ob.w - 0.1);
-    S.windowBounds.w = ob.x + ob.w - S.windowBounds.x;
-    S.windowBounds.h = clamp(ob.h + dy, 0.1, 1 - ob.y);
-  } else if (adjustDrag.corner === 'br') {
-    S.windowBounds.w = clamp(ob.w + dx, 0.1, 1 - ob.x);
-    S.windowBounds.h = clamp(ob.h + dy, 0.1, 1 - ob.y);
-  }
-
-  drawAdjustRect();
-  drawPreview();
+  if (adjustDrag.corner === 'move') { S.windowBounds.x = clamp(ob.x + dx, 0, 1 - ob.w); S.windowBounds.y = clamp(ob.y + dy, 0, 1 - ob.h); }
+  else if (adjustDrag.corner === 'tl') { S.windowBounds.x = clamp(ob.x + dx, 0, ob.x + ob.w - 0.1); S.windowBounds.y = clamp(ob.y + dy, 0, ob.y + ob.h - 0.1); S.windowBounds.w = ob.x + ob.w - S.windowBounds.x; S.windowBounds.h = ob.y + ob.h - S.windowBounds.y; }
+  else if (adjustDrag.corner === 'tr') { S.windowBounds.w = clamp(ob.w + dx, 0.1, 1 - ob.x); S.windowBounds.y = clamp(ob.y + dy, 0, ob.y + ob.h - 0.1); S.windowBounds.h = ob.y + ob.h - S.windowBounds.y; }
+  else if (adjustDrag.corner === 'bl') { S.windowBounds.x = clamp(ob.x + dx, 0, ob.x + ob.w - 0.1); S.windowBounds.w = ob.x + ob.w - S.windowBounds.x; S.windowBounds.h = clamp(ob.h + dy, 0.1, 1 - ob.y); }
+  else if (adjustDrag.corner === 'br') { S.windowBounds.w = clamp(ob.w + dx, 0.1, 1 - ob.x); S.windowBounds.h = clamp(ob.h + dy, 0.1, 1 - ob.y); }
+  drawAdjustRect(); drawPreview();
 }
-
 function handleAdjustEnd() { adjustDrag = null; }
-
-// Mouse fallbacks for desktop testing
 function handleAdjustMouseDown(e) { handleAdjustStart(e); }
 function handleAdjustMouseMove(e) { if (adjustDrag) handleAdjustMove(e); }
 function handleAdjustMouseUp(e) { handleAdjustEnd(); }
 
 // ===== SHARING =====
-async function shareResults() {
-  const dims = calcDims();
-  const text = buildResultText(dims);
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: 'My Curtain Measurements — Ästhetik', text: text });
-    } catch (e) { copyToClipboard(text); }
-  } else {
-    copyToClipboard(text);
-  }
-}
+window.shareResults = async function() {
+  const dims = calcDims(); const text = buildResultText(dims);
+  if (navigator.share) { try { await navigator.share({ title: 'My Curtain Measurements \u2014 \u00c4sthetik', text }); } catch (e) { copyToClipboard(text); } }
+  else { copyToClipboard(text); }
+};
 
-function emailResults() {
-  const dims = calcDims();
-  const text = buildResultText(dims);
-  const subject = encodeURIComponent('My Curtain Measurements — Ästhetik');
-  const body = encodeURIComponent(text);
-  window.location.href = `mailto:?subject=${subject}&body=${body}`;
-}
+window.emailResults = function() {
+  const dims = calcDims(); const text = buildResultText(dims);
+  const subject = encodeURIComponent('My Curtain Measurements \u2014 \u00c4sthetik');
+  window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(text)}`;
+};
 
 function buildResultText(dims) {
-  const styleObj = STYLES.find(s => s.id === S.style);
-  const lengthObj = LENGTHS.find(l => l.id === S.length);
-  return `My Curtain Measurements (Ästhetik Curtain Studio)
-━━━━━━━━━━━━━━━━━━
-Window Width: ${S.width}"
-Length: ${lengthObj.name} (${dims.finLen}")
-Style: ${styleObj.name}
-Fullness: ${S.fullness}×
-
-Cut Sheet:
-  Cut Width per panel: ${dims.cutW.toFixed(1)}"
-  Cut Length per panel: ${dims.cutLen.toFixed(1)}"
-  Panels: ${dims.panels}
-  Fabric widths per panel: ${dims.widths}
-  Bolt width: ${dims.bolt}"
-
-  → Total Fabric: ${dims.yards.toFixed(1)} yards
-━━━━━━━━━━━━━━━━━━
-heritagefabrics.com`;
+  const styleObj = STYLES.find(s => s.id === S.style); const lengthObj = LENGTHS.find(l => l.id === S.length);
+  let text = `My Curtain Measurements (\u00c4sthetik Curtain Studio)\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\nWindow Width: ${S.width}"`;
+  if (S.height > 0) text += `\nWindow Height: ${S.height}"`;
+  text += `\nLength: ${lengthObj.name} (${dims.finLen}")\nStyle: ${styleObj.name}\nFullness: ${S.fullness}\u00d7\n\nCut Sheet:\n  Cut Width per panel: ${dims.cutW.toFixed(1)}"\n  Cut Length per panel: ${dims.cutLen.toFixed(1)}"\n  Panels: ${dims.panels}\n  Fabric widths per panel: ${dims.widths}\n  Bolt width: ${dims.bolt}"\n\n  \u2192 Total Fabric: ${dims.yards.toFixed(1)} yards\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\nheritagefabrics.com`;
+  return text;
 }
 
 function copyToClipboard(text) {
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Copied to clipboard! Paste it in a text or email.');
-  }).catch(() => {
-    prompt('Copy this text:', text);
-  });
+  navigator.clipboard.writeText(text).then(() => { alert('Copied to clipboard! Paste it in a text or email.'); }).catch(() => { prompt('Copy this text:', text); });
 }
 
-function startOver() {
-  S.photo = null; S.width = 0; S.length = 'floor'; S.style = 'rod-pocket';
+window.startOver = function() {
+  S.photo = null; S.width = 0; S.height = 0; S.length = 'floor'; S.style = 'rod-pocket';
   S.fullness = 2; S.pattern = 'solid'; S.windowBounds = null; S.windowDetectionConfidence = 0;
+  S.measurementMethod = 'manual'; S.aiEstimate = null; S.confidence = 0; S.exif = null; S.consentToStore = false;
   document.getElementById('widthInput').value = '';
   document.getElementById('bottomNav').style.display = '';
-  renderQuickpicks();
-  goToStep(1);
-  retakePhoto();
-}
+  document.getElementById('aiResult').style.display = 'none';
+  document.getElementById('analyzing').style.display = 'none';
+  document.getElementById('manualInput').style.display = '';
+  renderQuickpicks(); goToStep(1); retakePhotoModule(S);
+};
 
 // ===== BOOT =====
 parseShopifyParams();
 
-// Sync width input with quickpick
 document.addEventListener('DOMContentLoaded', () => {
   const inp = document.getElementById('widthInput');
   if (inp) {
     inp.addEventListener('input', () => {
-      const v = parseFloat(inp.value) || 0;
-      S.width = v;
-      // Deselect quickpicks if manual entry doesn't match
+      const v = parseFloat(inp.value) || 0; S.width = v;
       document.querySelectorAll('.quickpick').forEach(q => q.classList.remove('selected'));
       const match = SIZES.find(s => s.w === v);
-      if (match) {
-        document.querySelectorAll('.quickpick').forEach(q => {
-          if (q.querySelector('.quickpick-size').textContent === v + '"') q.classList.add('selected');
-        });
-      }
+      if (match) { document.querySelectorAll('.quickpick').forEach(q => { if (q.querySelector('.quickpick-size').textContent === v + '"') q.classList.add('selected'); }); }
     });
   }
+  // Wire slider inputs for AI estimation
+  const sliderW = document.getElementById('sliderWidth');
+  const sliderH = document.getElementById('sliderHeight');
+  if (sliderW) sliderW.addEventListener('input', () => { const v = parseFloat(sliderW.value); S.width = v; document.getElementById('sliderWidthVal').textContent = v; document.getElementById('estWidth').textContent = v; });
+  if (sliderH) sliderH.addEventListener('input', () => { const v = parseFloat(sliderH.value); S.height = v; document.getElementById('sliderHeightVal').textContent = v; document.getElementById('estHeight').textContent = v; });
 });
 </script>
 </body>
